@@ -61,12 +61,22 @@ export async function initializeDatabase() {
     CREATE TABLE IF NOT EXISTS matches (
       id SERIAL PRIMARY KEY,
       created_by_user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      title VARCHAR(100),
+      emoji VARCHAR(10),
       date_time TIMESTAMP WITH TIME ZONE NOT NULL,
       location_type location_type NOT NULL DEFAULT 'TERRAZAS',
       location_custom VARCHAR(255),
       created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
     )
   `
+  
+  // Add title and emoji columns if they don't exist (for existing databases)
+  try {
+    await sql`ALTER TABLE matches ADD COLUMN IF NOT EXISTS title VARCHAR(100)`
+    await sql`ALTER TABLE matches ADD COLUMN IF NOT EXISTS emoji VARCHAR(10)`
+  } catch {
+    // Columns might already exist
+  }
 
   await sql`
     CREATE TABLE IF NOT EXISTS match_participants (
