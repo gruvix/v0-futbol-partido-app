@@ -1,7 +1,6 @@
 'use client'
 
 import React from "react"
-
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
@@ -10,6 +9,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { login } from '@/app/actions/auth'
+import { FootballLoader } from '@/components/football-loader'
 
 export default function LoginPage() {
   const [error, setError] = useState('')
@@ -27,8 +27,9 @@ export default function LoginPage() {
     if (result?.error) {
       setError(result.error)
       setLoading(false)
-    } else {
-      router.push('/dashboard')
+    } else if (result?.redirect) {
+      router.push(result.redirect)
+      router.refresh()
     }
   }
 
@@ -52,6 +53,7 @@ export default function LoginPage() {
                 placeholder="Tu nombre"
                 required
                 autoComplete="username"
+                disabled={loading}
               />
             </div>
 
@@ -66,6 +68,7 @@ export default function LoginPage() {
                 maxLength={4}
                 placeholder="1234"
                 required
+                disabled={loading}
               />
             </div>
 
@@ -78,6 +81,7 @@ export default function LoginPage() {
                 placeholder="Tu contraseña"
                 required
                 autoComplete="current-password"
+                disabled={loading}
               />
             </div>
 
@@ -86,7 +90,14 @@ export default function LoginPage() {
             )}
 
             <Button type="submit" className="w-full" disabled={loading}>
-              {loading ? 'Entrando...' : 'Entrar'}
+              {loading ? (
+                <span className="flex items-center gap-2">
+                  <FootballLoader size="sm" />
+                  Entrando...
+                </span>
+              ) : (
+                'Entrar'
+              )}
             </Button>
 
             <p className="text-sm text-center text-muted-foreground">

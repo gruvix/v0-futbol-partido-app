@@ -1,6 +1,6 @@
 'use server'
 
-import { registerUser, loginUser, destroySession, getSession } from '@/lib/auth'
+import { registerUser, loginUser, destroySession, getSession, isApprovalRequired } from '@/lib/auth'
 import { redirect } from 'next/navigation'
 
 export async function register(formData: FormData) {
@@ -21,8 +21,14 @@ export async function register(formData: FormData) {
   }
 
   try {
-    await registerUser(name.trim(), phoneLast4, password)
-    return { success: true, message: 'Solicitud enviada. Un administrador debe aprobar tu cuenta.' }
+    const result = await registerUser(name.trim(), phoneLast4, password)
+    
+    if (result.pending) {
+      return { success: true, pending: true, message: 'Solicitud enviada. Un administrador debe aprobar tu cuenta.' }
+    } else {
+      // User was created and auto-logged in, redirect to dashboard
+      return { success: true, pending: false, redirect: '/dashboard' }
+    }
   } catch (error) {
     return { error: error instanceof Error ? error.message : 'Error al registrar' }
   }
@@ -39,7 +45,7 @@ export async function login(formData: FormData) {
 
   try {
     await loginUser(name.trim(), phoneLast4, password)
-    redirect('/dashboard')
+    return { success: true, redirect: '/dashboard' }
   } catch (error) {
     return { error: error instanceof Error ? error.message : 'Error al iniciar sesion' }
   }
@@ -52,4 +58,8 @@ export async function logout() {
 
 export async function getCurrentUser() {
   return await getSession()
+}
+
+export async function getApprovalRequired() {
+  return isApprovalRequired()
 }

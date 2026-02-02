@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 import Link from 'next/link'
+import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -14,10 +15,23 @@ import {
   Shuffle, 
   Trash2,
   UserPlus,
-  UserMinus
+  UserMinus,
+  Share2
 } from 'lucide-react'
 import { joinMatch, leaveMatch, deleteMatch, randomizeTeams, assignTeam } from '@/app/actions/matches'
 import { TeamAssignment } from '@/components/team-assignment'
+import { InvitePlayersDialog } from '@/components/invite-players-dialog'
+import { FootballLoader } from '@/components/football-loader'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
 
 interface Match {
   id: number
@@ -66,8 +80,12 @@ export function MatchDetailClient({
   isPast,
   currentUserId,
 }: MatchDetailClientProps) {
-  const [loading, setLoading] = useState(false)
+  const [loading, setLoading] = useState<string | null>(null)
   const [error, setError] = useState('')
+  const [showInviteDialog, setShowInviteDialog] = useState(false)
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
+  const [showLastPlayerConfirm, setShowLastPlayerConfirm] = useState(false)
+  const router = useRouter()
 
   const date = new Date(match.date_time)
   const dayNames = ['Domingo', 'Lunes', 'Martes', 'Miercoles', 'Jueves', 'Viernes', 'Sabado']
@@ -85,39 +103,49 @@ export function MatchDetailClient({
   const extras = participants.filter(p => p.role === 'EXTRA')
 
   async function handleJoin(role: 'PLAYER' | 'SUBSTITUTE' | 'EXTRA') {
-    setLoading(true)
+    setLoading(`join-${role}`)
     setError('')
     const result = await joinMatch(match.id, role)
     if (result?.error) {
       setError(result.error)
     }
-    setLoading(false)
+    setLoading(null)
   }
 
   async function handleLeave() {
-    setLoading(true)
+    setLoading('leave')
     setError('')
     const result = await leaveMatch(match.id)
     if (result?.error) {
       setError(result.error)
+      setLoading(null)
+    } else if (result?.isLastPlayer) {
+      setLoading(null)
+      setShowLastPlayerConfirm(true)
+    } else {
+      setLoading(null)
     }
-    setLoading(false)
   }
 
   async function handleDelete() {
-    if (!confirm('Seguro que queres eliminar este partido?')) return
-    setLoading(true)
-    await deleteMatch(match.id)
+    setLoading('delete')
+    const result = await deleteMatch(match.id)
+    if (result?.error) {
+      setError(result.error)
+      setLoading(null)
+    } else if (result?.redirect) {
+      router.push(result.redirect)
+    }
   }
 
   async function handleRandomize() {
-    setLoading(true)
+    setLoading('randomize')
     setError('')
     const result = await randomizeTeams(match.id)
     if (result?.error) {
       setError(result.error)
     }
-    setLoading(false)
+    setLoading(null)
   }
 
   async function handleAssignTeam(participantId: number, team: 'A' | 'B' | null) {
@@ -127,8 +155,10 @@ export function MatchDetailClient({
     }
   }
 
+  const isLoading = loading !== null
+
   return (
-    <div className="flex flex-col gap-4">
+    <div className="flex flex-col gap-4 pb-8">
       <Link href="/dashboard" className="flex items-center gap-2 text-muted-foreground hover:text-foreground transition-colors w-fit">
         <ArrowLeft className="w-4 h-4" />
         Volver
@@ -177,10 +207,14 @@ export function MatchDetailClient({
                     variant="outline"
                     size="sm"
                     onClick={handleLeave}
-                    disabled={loading}
+                    disabled={isLoading}
                     className="gap-2 bg-transparent"
                   >
-                    <UserMinus className="w-4 h-4" />
+                    {loading === 'leave' ? (
+                      <FootballLoader size="sm" />
+                    ) : (
+                      <UserMinus className="w-4 h-4" />
+                    )}
                     Borrarme
                   </Button>
                   {userParticipation.role !== 'PLAYER' && (
@@ -188,9 +222,13 @@ export function MatchDetailClient({
                       variant="secondary"
                       size="sm"
                       onClick={() => handleJoin('PLAYER')}
-                      disabled={loading}
+                      disabled={isLoading}
                     >
-                      Cambiar a Jugador
+                      {loading === 'join-PLAYER' ? (
+                        <FootballLoader size="sm" />
+                      ) : (
+                        'Cambiar a Jugador'
+                      )}
                     </Button>
                   )}
                 </div>
@@ -198,25 +236,37 @@ export function MatchDetailClient({
                 <div className="flex flex-wrap gap-2">
                   <Button
                     onClick={() => handleJoin('PLAYER')}
-                    disabled={loading}
+                    disabled={isLoading}
                     className="gap-2"
                   >
-                    <UserPlus className="w-4 h-4" />
+                    {loading === 'join-PLAYER' ? (
+                      <FootballLoader size="sm" />
+                    ) : (
+                      <UserPlus className="w-4 h-4" />
+                    )}
                     Anotarme
                   </Button>
                   <Button
                     variant="secondary"
                     onClick={() => handleJoin('SUBSTITUTE')}
-                    disabled={loading}
+                    disabled={isLoading}
                   >
-                    Como suplente
+                    {loading === 'join-SUBSTITUTE' ? (
+                      <FootballLoader size="sm" />
+                    ) : (
+                      'Como suplente'
+                    )}
                   </Button>
                   <Button
                     variant="outline"
                     onClick={() => handleJoin('EXTRA')}
-                    disabled={loading}
+                    disabled={isLoading}
                   >
-                    Por las dudas
+                    {loading === 'join-EXTRA' ? (
+                      <FootballLoader size="sm" />
+                    ) : (
+                      'Por las dudas'
+                    )}
                   </Button>
                 </div>
               )}
@@ -225,23 +275,41 @@ export function MatchDetailClient({
 
           {/* Participants */}
           <div className="flex flex-col gap-4">
-            <div className="flex items-center justify-between">
+            <div className="flex items-center justify-between flex-wrap gap-2">
               <h3 className="font-semibold text-foreground flex items-center gap-2">
                 <Users className="w-5 h-5" />
                 Anotados ({participants.length})
               </h3>
-              {isCreator && !isPast && players.length >= 2 && (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={handleRandomize}
-                  disabled={loading}
-                  className="gap-2 bg-transparent"
-                >
-                  <Shuffle className="w-4 h-4" />
-                  Sortear equipos
-                </Button>
-              )}
+              <div className="flex items-center gap-2">
+                {!isPast && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setShowInviteDialog(true)}
+                    disabled={isLoading}
+                    className="gap-2 bg-transparent"
+                  >
+                    <Share2 className="w-4 h-4" />
+                    Invitar
+                  </Button>
+                )}
+                {isCreator && !isPast && players.length >= 2 && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={handleRandomize}
+                    disabled={isLoading}
+                    className="gap-2 bg-transparent"
+                  >
+                    {loading === 'randomize' ? (
+                      <FootballLoader size="sm" />
+                    ) : (
+                      <Shuffle className="w-4 h-4" />
+                    )}
+                    Sortear equipos
+                  </Button>
+                )}
+              </div>
             </div>
 
             {players.length > 0 && (
@@ -291,17 +359,65 @@ export function MatchDetailClient({
               <Button
                 variant="destructive"
                 size="sm"
-                onClick={handleDelete}
-                disabled={loading}
+                onClick={() => setShowDeleteConfirm(true)}
+                disabled={isLoading}
                 className="gap-2"
               >
-                <Trash2 className="w-4 h-4" />
+                {loading === 'delete' ? (
+                  <FootballLoader size="sm" />
+                ) : (
+                  <Trash2 className="w-4 h-4" />
+                )}
                 Eliminar partido
               </Button>
             </div>
           )}
         </CardContent>
       </Card>
+
+      {/* Invite Dialog */}
+      <InvitePlayersDialog
+        open={showInviteDialog}
+        onOpenChange={setShowInviteDialog}
+        matchId={match.id}
+        currentParticipantIds={participants.map(p => p.user_id)}
+      />
+
+      {/* Delete Confirmation Dialog */}
+      <AlertDialog open={showDeleteConfirm} onOpenChange={setShowDeleteConfirm}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Eliminar partido</AlertDialogTitle>
+            <AlertDialogDescription>
+              Seguro que queres eliminar este partido? Esta accion no se puede deshacer.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogAction onClick={handleDelete} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+              Eliminar
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Last Player Confirmation Dialog */}
+      <AlertDialog open={showLastPlayerConfirm} onOpenChange={setShowLastPlayerConfirm}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Sos el ultimo anotado</AlertDialogTitle>
+            <AlertDialogDescription>
+              Ya no queda nadie mas en este partido. Queres eliminarlo?
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Dejar el partido</AlertDialogCancel>
+            <AlertDialogAction onClick={handleDelete} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+              Eliminar partido
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   )
 }
