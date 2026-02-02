@@ -1,19 +1,21 @@
 'use client'
 
 import React from "react"
-
 import { useState } from 'react'
+import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { register } from '@/app/actions/auth'
+import { FootballLoader } from '@/components/football-loader'
 
 export default function RegistroPage() {
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
   const [loading, setLoading] = useState(false)
+  const router = useRouter()
 
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault()
@@ -24,12 +26,17 @@ export default function RegistroPage() {
     const formData = new FormData(e.currentTarget)
     const result = await register(formData)
 
-    setLoading(false)
-
     if (result?.error) {
       setError(result.error)
+      setLoading(false)
     } else if (result?.success) {
-      setSuccess(result.message || 'Solicitud enviada')
+      if (result.pending) {
+        setSuccess(result.message || 'Solicitud enviada')
+        setLoading(false)
+      } else if (result.redirect) {
+        router.push(result.redirect)
+        router.refresh()
+      }
     }
   }
 
@@ -45,7 +52,7 @@ export default function RegistroPage() {
         <CardContent>
           {success ? (
             <div className="flex flex-col gap-4 text-center">
-              <div className="rounded-lg bg-accent p-4">
+              <div className="rounded-lg bg-primary/10 p-4">
                 <p className="text-foreground font-medium">{success}</p>
               </div>
               <Link href="/login">
@@ -65,6 +72,7 @@ export default function RegistroPage() {
                   placeholder="Tu nombre"
                   required
                   autoComplete="name"
+                  disabled={loading}
                 />
               </div>
 
@@ -79,6 +87,7 @@ export default function RegistroPage() {
                   maxLength={4}
                   placeholder="1234"
                   required
+                  disabled={loading}
                 />
                 <p className="text-xs text-muted-foreground">
                   Tu nombre + estos 4 digitos te identifican
@@ -95,6 +104,7 @@ export default function RegistroPage() {
                   required
                   minLength={4}
                   autoComplete="new-password"
+                  disabled={loading}
                 />
               </div>
 
@@ -103,7 +113,14 @@ export default function RegistroPage() {
               )}
 
               <Button type="submit" className="w-full" disabled={loading}>
-                {loading ? 'Registrando...' : 'Crear cuenta'}
+                {loading ? (
+                  <span className="flex items-center gap-2">
+                    <FootballLoader size="sm" />
+                    Creando cuenta...
+                  </span>
+                ) : (
+                  'Crear cuenta'
+                )}
               </Button>
 
               <p className="text-sm text-center text-muted-foreground">

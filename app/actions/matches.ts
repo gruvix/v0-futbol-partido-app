@@ -3,7 +3,6 @@
 import { sql } from '@/lib/db'
 import { getSession } from '@/lib/auth'
 import { revalidatePath } from 'next/cache'
-import { redirect } from 'next/navigation'
 
 export async function createMatch(formData: FormData) {
   const session = await getSession()
@@ -40,7 +39,7 @@ export async function createMatch(formData: FormData) {
     `
 
     revalidatePath('/dashboard', 'max')
-    redirect(`/dashboard/partido/${result[0].id}`)
+    return { success: true, matchId: result[0].id, redirect: `/dashboard/partido/${result[0].id}` }
   } catch (error) {
     console.error('Error creating match:', error)
     return { error: 'Error al crear el partido' }
@@ -95,9 +94,19 @@ export async function leaveMatch(matchId: number) {
       WHERE match_id = ${matchId} AND user_id = ${session.userId}
     `
 
+    // Check remaining participants
+    const remaining = await sql`
+      SELECT COUNT(*) as count FROM match_participants WHERE match_id = ${matchId}
+    `
+
     revalidatePath(`/dashboard/partido/${matchId}`, 'max')
     revalidatePath('/dashboard', 'max')
-    return { success: true }
+    
+    return { 
+      success: true, 
+      remainingPlayers: Number(remaining[0].count),
+      isLastPlayer: Number(remaining[0].count) === 0
+    }
   } catch (error) {
     console.error('Error leaving match:', error)
     return { error: 'Error al borrarse' }
@@ -122,7 +131,7 @@ export async function deleteMatch(matchId: number) {
   try {
     await sql`DELETE FROM matches WHERE id = ${matchId}`
     revalidatePath('/dashboard', 'max')
-    redirect('/dashboard')
+    return { success: true, redirect: '/dashboard' }
   } catch (error) {
     console.error('Error deleting match:', error)
     return { error: 'Error al eliminar el partido' }
@@ -199,5 +208,73 @@ export async function randomizeTeams(matchId: number) {
   } catch (error) {
     console.error('Error randomizing teams:', error)
     return { error: 'Error al sortear equipos' }
+  }
+}
+
+export async function invitePlayer(matchId: number, userId: number, role: 'PLAYER' | 'SUBSTITUTE' | 'EXTRA' = 'PLAYER') {
+  const session = await getSession()
+  if (!session) {
+    return { error: 'No autenticado' }
+  }
+
+  try {
+    // Check if already invited/joined
+    const existing = await sql`
+      SELECT id FROM match_participants 
+      WHERE match_id = ${matchId} AND user_id = ${userId}
+    `
+
+    if (existing.length > 0) {
+      return { error: 'Este jugador ya esta anotado' }
+    }
+
+    await sql`
+      INSERT INTO match_participants (match_id, user_id, role)
+      VALUES (${matchId}, ${userId}, ${role})
+    `
+
+    revalidatePath(`/dashboard/partido/${matchId}`, 'max')
+    revalidatePath('/dashboard', 'max')
+    return { success: true }
+  } catch (error) {
+    console.error('Error inviting player:', error)
+    return { error: 'Error al invitar jugador' }
+  }
+}
+
+export async function getAllUsers() {
+  const session = await getSession()
+  if (!session) {
+    return { error: 'No autenticado', users: [] }
+  }
+
+  try {
+    const users = await sql`
+      SELECT id, name, phone_last_four 
+      FROM users 
+      WHERE is_approved = true
+      ORDER BY name ASC
+    `
+    return { users }
+  } catch (error) {
+    console.error('Error getting users:', error)
+    return { error: 'Error al obtener usuarios', users: [] }
+  }
+}
+
+export async function getMatchParticipantIds(matchId: number) {
+  const session = await getSession()
+  if (!session) {
+    return { error: 'No autenticado', participantIds: [] }
+  }
+
+  try {
+    const participants = await sql`
+      SELECT user_id FROM match_participants WHERE match_id = ${matchId}
+    `
+    return { participantIds: participants.map(p => p.user_id) }
+  } catch (error) {
+    console.error('Error getting participant ids:', error)
+    return { error: 'Error', participantIds: [] }
   }
 }

@@ -4,6 +4,9 @@ import bcrypt from 'bcryptjs'
 
 const SESSION_DURATION_DAYS = 30
 
+// Set REQUIRE_APPROVAL=true to enable manual approval for new users
+const REQUIRE_APPROVAL = process.env.REQUIRE_APPROVAL === 'true'
+
 export async function hashPassword(password: string): Promise<string> {
   return bcrypt.hash(password, 12)
 }
@@ -85,22 +88,36 @@ export async function registerUser(name: string, phoneLast4: string, password: s
     throw new Error('Ya existe un usuario con ese nombre y numero')
   }
 
-  // Check if pending request exists
-  const existingPending = await sql`
-    SELECT id FROM pending_users WHERE name = ${name} AND phone_last_four = ${phoneLast4}
-  `
-  
-  if (existingPending.length > 0) {
-    throw new Error('Ya tenes una solicitud pendiente de aprobacion')
+  if (REQUIRE_APPROVAL) {
+    // Check if pending request exists
+    const existingPending = await sql`
+      SELECT id FROM pending_users WHERE name = ${name} AND phone_last_four = ${phoneLast4}
+    `
+    
+    if (existingPending.length > 0) {
+      throw new Error('Ya tenes una solicitud pendiente de aprobacion')
+    }
+
+    // Create pending user
+    await sql`
+      INSERT INTO pending_users (name, phone_last_four, password_hash)
+      VALUES (${name}, ${phoneLast4}, ${passwordHash})
+    `
+
+    return { pending: true }
+  } else {
+    // Create user directly (no approval needed)
+    const result = await sql`
+      INSERT INTO users (name, phone_last_four, password_hash, is_approved)
+      VALUES (${name}, ${phoneLast4}, ${passwordHash}, true)
+      RETURNING id
+    `
+    
+    // Auto-login the new user
+    await createSession(result[0].id)
+    
+    return { pending: false, userId: result[0].id }
   }
-
-  // Create pending user
-  await sql`
-    INSERT INTO pending_users (name, phone_last_four, password_hash)
-    VALUES (${name}, ${phoneLast4}, ${passwordHash})
-  `
-
-  return { pending: true }
 }
 
 export async function loginUser(name: string, phoneLast4: string, password: string) {
@@ -110,19 +127,21 @@ export async function loginUser(name: string, phoneLast4: string, password: stri
   `
 
   if (users.length === 0) {
-    // Check if pending
-    const pending = await sql`
-      SELECT id FROM pending_users WHERE name = ${name} AND phone_last_four = ${phoneLast4}
-    `
-    if (pending.length > 0) {
-      throw new Error('Tu cuenta esta pendiente de aprobacion')
+    if (REQUIRE_APPROVAL) {
+      // Check if pending
+      const pending = await sql`
+        SELECT id FROM pending_users WHERE name = ${name} AND phone_last_four = ${phoneLast4}
+      `
+      if (pending.length > 0) {
+        throw new Error('Tu cuenta esta pendiente de aprobacion')
+      }
     }
     throw new Error('Usuario no encontrado')
   }
 
   const user = users[0]
   
-  if (!user.is_approved) {
+  if (REQUIRE_APPROVAL && !user.is_approved) {
     throw new Error('Tu cuenta no esta aprobada')
   }
 
@@ -133,4 +152,8 @@ export async function loginUser(name: string, phoneLast4: string, password: stri
 
   await createSession(user.id)
   return { success: true, userId: user.id }
+}
+
+export function isApprovalRequired() {
+  return REQUIRE_APPROVAL
 }

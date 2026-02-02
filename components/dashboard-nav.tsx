@@ -1,11 +1,13 @@
 'use client'
 
+import { useState } from 'react'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { logout } from '@/app/actions/auth'
-import { Calendar, Users, Plus, LogOut } from 'lucide-react'
+import { Calendar, Users, Plus, LogOut, Home } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { FootballLoader } from '@/components/football-loader'
 
 interface DashboardNavProps {
   userName: string
@@ -13,15 +15,21 @@ interface DashboardNavProps {
 
 export function DashboardNav({ userName }: DashboardNavProps) {
   const pathname = usePathname()
+  const [loggingOut, setLoggingOut] = useState(false)
 
   const navItems = [
-    { href: '/dashboard', label: 'Partidos', icon: Calendar },
+    { href: '/dashboard', label: 'Partidos', icon: Home },
     { href: '/dashboard/calendario', label: 'Calendario', icon: Calendar },
     { href: '/dashboard/jugadores', label: 'Jugadores', icon: Users },
   ]
 
+  async function handleLogout() {
+    setLoggingOut(true)
+    await logout()
+  }
+
   return (
-    <header className="sticky top-0 z-50 border-b border-border bg-card">
+    <header className="sticky top-0 z-50 border-b border-border bg-card/95 backdrop-blur supports-[backdrop-filter]:bg-card/80">
       <div className="container mx-auto px-4 max-w-4xl">
         <div className="flex items-center justify-between h-14">
           <Link href="/dashboard" className="flex items-center gap-2">
@@ -61,12 +69,21 @@ export function DashboardNav({ userName }: DashboardNavProps) {
               </Button>
             </Link>
             
-            <form action={logout}>
-              <Button variant="ghost" size="sm" className="gap-2" title={`Salir (${userName})`}>
+            <Button 
+              variant="ghost" 
+              size="sm" 
+              className="gap-2" 
+              title={`Salir (${userName})`}
+              onClick={handleLogout}
+              disabled={loggingOut}
+            >
+              {loggingOut ? (
+                <FootballLoader size="sm" />
+              ) : (
                 <LogOut className="w-4 h-4" />
-                <span className="sr-only">Salir</span>
-              </Button>
-            </form>
+              )}
+              <span className="sr-only">Salir</span>
+            </Button>
           </div>
         </div>
 
