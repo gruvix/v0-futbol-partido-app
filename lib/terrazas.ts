@@ -59,15 +59,20 @@ function extractNextData(html: string): unknown | null {
   }
 }
 
+const CONTEXT_WINDOW_SIZE = 50
+const TIME_REGEX = /\b([01]?\d|2[0-3]):([0-5]\d)\b/g
+
 function extractSlotsFromHtml(html: string): SlotAvailability[] {
   const results: SlotAvailability[] = []
-  const timeRegex = /(\d{1,2}:\d{2})/g
   let match: RegExpExecArray | null
 
-  while ((match = timeRegex.exec(html)) !== null) {
-    const time = match[1]
+  while ((match = TIME_REGEX.exec(html)) !== null) {
+    const time = `${match[1].padStart(2, '0')}:${match[2]}`
     // Peek around the match for availability keywords
-    const context = html.slice(Math.max(0, match.index - 50), match.index + 50)
+    const context = html.slice(
+      Math.max(0, match.index - CONTEXT_WINDOW_SIZE),
+      match.index + CONTEXT_WINDOW_SIZE
+    )
     const available =
       /disponible|available|true/i.test(context) && !/no\s+disponible|false/i.test(context)
     results.push({ time, available })
@@ -139,8 +144,14 @@ function getTimeValue(record: Record<string, unknown>): string | null {
     record.time || record.hour || record.hora || record.horario || record.slot || record.horario_desde
   if (typeof candidate === 'string') {
     const normalized = candidate.trim()
-    const match = normalized.match(/(\d{1,2}:\d{2})/)
-    return match ? match[1] : normalized
+    const match = normalized.match(TIME_REGEX)
+    if (match) {
+      const [, hh, mm] = match
+      if (hh && mm) {
+        return `${hh.padStart(2, '0')}:${mm}`
+      }
+    }
+    return null
   }
   return null
 }
@@ -188,9 +199,13 @@ function dedupeSlots(slots: SlotAvailability[]): SlotAvailability[] {
     const existing = seen.get(slot.time)
     if (!existing) {
       seen.set(slot.time, slot)
-    } else if (!existing.available && slot.available) {
-      // Prefer availability=true if conflicting data
-      seen.set(slot.time, slot)
+    } else {
+      const shouldReplaceAvailability = !existing.available && slot.available
+      const shouldMergePrice = slot.price !== undefined && existing.price === undefined
+
+      if (shouldReplaceAvailability || shouldMergePrice) {
+        seen.set(slot.time, { ...existing, ...slot })
+      }
     }
   }
   return Array.from(seen.values()).sort((a, b) => a.time.localeCompare(b.time))

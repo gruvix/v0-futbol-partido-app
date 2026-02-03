@@ -15,7 +15,7 @@ export async function GET(request: Request) {
     const slots = await fetchTerrazasAvailability(date)
     return NextResponse.json({ date, slots })
   } catch (error) {
-    console.error('Failed to fetch Terrazas availability', error)
+    console.error('Failed to fetch Terrazas availability', (error as Error).message)
     return NextResponse.json({ error: 'Failed to fetch availability' }, { status: 502 })
   }
 }
