@@ -2,6 +2,9 @@ import { neon } from '@neondatabase/serverless'
 
 export const sql = neon(process.env.DATABASE_URL!)
 
+export type MatchVisibility = 'PUBLIC' | 'PRIVATE'
+export type ResultTeam = 'A' | 'B' | 'DRAW'
+
 export async function initializeDatabase() {
   // Create enum types (ignore if already exists)
   try {
@@ -18,6 +21,19 @@ export async function initializeDatabase() {
   
   try {
     await sql`CREATE TYPE team_side AS ENUM ('A', 'B')`
+  } catch {
+    // Type already exists
+  }
+  
+  // New enum types for visibility and results
+  try {
+    await sql`CREATE TYPE match_visibility AS ENUM ('PUBLIC', 'PRIVATE')`
+  } catch {
+    // Type already exists
+  }
+  
+  try {
+    await sql`CREATE TYPE result_team AS ENUM ('A', 'B', 'DRAW')`
   } catch {
     // Type already exists
   }
@@ -66,14 +82,24 @@ export async function initializeDatabase() {
       date_time TIMESTAMP WITH TIME ZONE NOT NULL,
       location_type location_type NOT NULL DEFAULT 'TERRAZAS',
       location_custom VARCHAR(255),
+      visibility match_visibility DEFAULT 'PUBLIC',
+      result_winner result_team,
+      result_score_a INTEGER,
+      result_score_b INTEGER,
+      result_notes TEXT,
       created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
     )
   `
   
-  // Add title and emoji columns if they don't exist (for existing databases)
+  // Add columns if they don't exist (for existing databases)
   try {
     await sql`ALTER TABLE matches ADD COLUMN IF NOT EXISTS title VARCHAR(100)`
     await sql`ALTER TABLE matches ADD COLUMN IF NOT EXISTS emoji VARCHAR(10)`
+    await sql`ALTER TABLE matches ADD COLUMN IF NOT EXISTS visibility match_visibility DEFAULT 'PUBLIC'`
+    await sql`ALTER TABLE matches ADD COLUMN IF NOT EXISTS result_winner result_team`
+    await sql`ALTER TABLE matches ADD COLUMN IF NOT EXISTS result_score_a INTEGER`
+    await sql`ALTER TABLE matches ADD COLUMN IF NOT EXISTS result_score_b INTEGER`
+    await sql`ALTER TABLE matches ADD COLUMN IF NOT EXISTS result_notes TEXT`
   } catch {
     // Columns might already exist
   }
@@ -97,6 +123,8 @@ export async function initializeDatabase() {
   await sql`CREATE INDEX IF NOT EXISTS idx_matches_created_by ON matches(created_by_user_id)`
   await sql`CREATE INDEX IF NOT EXISTS idx_match_participants_match ON match_participants(match_id)`
   await sql`CREATE INDEX IF NOT EXISTS idx_match_participants_user ON match_participants(user_id)`
+  await sql`CREATE INDEX IF NOT EXISTS idx_matches_visibility ON matches(visibility)`
+  await sql`CREATE INDEX IF NOT EXISTS idx_matches_date_visibility ON matches(date_time, visibility)`
 
   return { success: true }
 }

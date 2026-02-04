@@ -16,12 +16,17 @@ import {
   Trash2,
   UserPlus,
   UserMinus,
-  Share2
+  Share2,
+  Globe,
+  Lock,
+  Pencil
 } from 'lucide-react'
-import { joinMatch, leaveMatch, deleteMatch, randomizeTeams, assignTeam } from '@/app/actions/matches'
+import { joinMatch, leaveMatch, deleteMatch, randomizeTeams, assignTeam, updateMatchVisibility } from '@/app/actions/matches'
+import type { MatchVisibility, ResultTeam } from '@/lib/db'
 import { TeamAssignment } from '@/components/team-assignment'
 import { InvitePlayersDialog } from '@/components/invite-players-dialog'
 import { FootballLoader } from '@/components/football-loader'
+import { MatchResultForm } from '@/components/match-result-form'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -40,6 +45,11 @@ interface Match {
   location_custom: string | null
   created_by_user_id: number
   creator_name: string
+  visibility: MatchVisibility
+  result_winner: ResultTeam | null
+  result_score_a: number | null
+  result_score_b: number | null
+  result_notes: string | null
 }
 
 interface Participant {
@@ -92,7 +102,10 @@ export function MatchDetailClient({
   const monthNames = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre']
   
   const formattedDate = `${dayNames[date.getDay()]} ${date.getDate()} de ${monthNames[date.getMonth()]}`
-  const formattedTime = date.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' })
+  // Use explicit 24-hour format with padding to avoid locale/timezone issues
+  const hours = date.getHours().toString().padStart(2, '0')
+  const minutes = date.getMinutes().toString().padStart(2, '0')
+  const formattedTime = `${hours}:${minutes}`
   
   const location = match.location_type === 'OTRO' && match.location_custom
     ? match.location_custom
@@ -155,6 +168,17 @@ export function MatchDetailClient({
     }
   }
 
+  async function handleToggleVisibility() {
+    setLoading('visibility')
+    setError('')
+    const newVisibility: MatchVisibility = match.visibility === 'PUBLIC' ? 'PRIVATE' : 'PUBLIC'
+    const result = await updateMatchVisibility(match.id, newVisibility)
+    if (result?.error) {
+      setError(result.error)
+    }
+    setLoading(null)
+  }
+
   const isLoading = loading !== null
 
   return (
@@ -186,7 +210,62 @@ export function MatchDetailClient({
                 Organiza: {match.creator_name}
               </p>
             </div>
-            {isPast && <Badge variant="secondary">Finalizado</Badge>}
+            <div className="flex flex-col items-end gap-2">
+              {isPast && <Badge variant="secondary">Finalizado</Badge>}
+              <div className="flex items-center gap-2">
+                {/* Edit button for organizers */}
+                {isCreator && !isPast && (
+                  <Link href={`/dashboard/partido/${match.id}/editar`}>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="gap-2 bg-transparent"
+                    >
+                      <Pencil className="w-4 h-4" />
+                      Editar
+                    </Button>
+                  </Link>
+                )}
+                {/* Visibility badge/toggle */}
+                {isCreator && !isPast ? (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={handleToggleVisibility}
+                    disabled={isLoading}
+                    className="gap-2 bg-transparent"
+                  >
+                    {loading === 'visibility' ? (
+                      <FootballLoader size="sm" />
+                    ) : match.visibility === 'PUBLIC' ? (
+                      <>
+                        <Globe className="w-4 h-4" />
+                        Publico
+                      </>
+                    ) : (
+                      <>
+                        <Lock className="w-4 h-4" />
+                        Privado
+                      </>
+                    )}
+                  </Button>
+                ) : (
+                  <Badge variant="outline" className="gap-1">
+                    {match.visibility === 'PUBLIC' ? (
+                      <>
+                        <Globe className="w-3 h-3" />
+                        Publico
+                      </>
+                    ) : (
+                      <>
+                        <Lock className="w-3 h-3" />
+                        Privado
+                      </>
+                    )}
+                  </Badge>
+                )}
+              </div>
+            </div>
           </div>
         </CardHeader>
 
@@ -352,6 +431,20 @@ export function MatchDetailClient({
               <p className="text-muted-foreground text-sm">Todavia no hay nadie anotado</p>
             )}
           </div>
+
+          {/* Match Result for past matches */}
+          {isPast && (
+            <MatchResultForm
+              matchId={match.id}
+              isCreator={isCreator}
+              currentResult={{
+                winner: match.result_winner,
+                scoreA: match.result_score_a,
+                scoreB: match.result_score_b,
+                notes: match.result_notes,
+              }}
+            />
+          )}
 
           {/* Delete button for creator */}
           {isCreator && !isPast && (

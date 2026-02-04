@@ -1,5 +1,5 @@
 import { notFound } from 'next/navigation'
-import { sql } from '@/lib/db'
+import { sql, type MatchVisibility, type ResultTeam } from '@/lib/db'
 import { getSession } from '@/lib/auth'
 import { MatchDetailClient } from '@/components/match-detail-client'
 
@@ -10,6 +10,11 @@ interface Match {
   location_custom: string | null
   created_by_user_id: number
   creator_name: string
+  visibility: MatchVisibility
+  result_winner: ResultTeam | null
+  result_score_a: number | null
+  result_score_b: number | null
+  result_notes: string | null
 }
 
 interface Participant {
@@ -29,6 +34,11 @@ async function getMatch(id: number): Promise<Match | null> {
       m.location_type,
       m.location_custom,
       m.created_by_user_id,
+      m.visibility,
+      m.result_winner,
+      m.result_score_a,
+      m.result_score_b,
+      m.result_notes,
       u.name as creator_name
     FROM matches m
     JOIN users u ON m.created_by_user_id = u.id
@@ -85,6 +95,11 @@ export default async function MatchDetailPage({
   const isCreator = match.created_by_user_id === session.userId
   const userParticipation = participants.find(p => p.user_id === session.userId)
   const isPast = new Date(match.date_time) < new Date()
+
+  // Access control: private matches only accessible to creator or participants
+  if (match.visibility === 'PRIVATE' && !isCreator && !userParticipation) {
+    notFound()
+  }
 
   return (
     <MatchDetailClient

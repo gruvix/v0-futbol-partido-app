@@ -1,15 +1,15 @@
 'use client'
 
 import React from "react"
-import { useState } from 'react'
-import { useRouter } from 'next/navigation'
+import { useState, useEffect } from 'react'
+import { useRouter, useParams } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
 import { Input } from '@/components/ui/input'
-import { createMatch } from '@/app/actions/matches'
-import { ArrowLeft, Calendar, Clock, MapPin, Globe, Lock } from 'lucide-react'
+import { updateMatch } from '@/app/actions/matches'
+import { ArrowLeft, Calendar, Clock, MapPin, Globe, Lock, Loader2 } from 'lucide-react'
 import Link from 'next/link'
 import { FootballLoader } from '@/components/football-loader'
 
@@ -24,26 +24,78 @@ const COMMON_TIMES = [
   { label: '22:30', value: '22:30' },
 ]
 
-export default function NuevoPartidoPage() {
+interface MatchData {
+  id: number
+  date_time: string
+  location_type: string
+  location_custom: string | null
+  visibility: 'PUBLIC' | 'PRIVATE'
+}
+
+export default function EditarPartidoPage() {
+  const params = useParams()
+  const matchId = params.id as string
+  
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
+  const [loadingMatch, setLoadingMatch] = useState(true)
   const [locationType, setLocationType] = useState('TERRAZAS')
+  const [locationCustom, setLocationCustom] = useState('')
   const [selectedTime, setSelectedTime] = useState('21:00')
   const [customTime, setCustomTime] = useState('')
   const [useCustomTime, setUseCustomTime] = useState(false)
   const [visibility, setVisibility] = useState<'PUBLIC' | 'PRIVATE'>('PUBLIC')
+  const [selectedDate, setSelectedDate] = useState('')
   const router = useRouter()
 
-  // Generate next 7 days
-  const dates = Array.from({ length: 7 }, (_, i) => {
+  // Generate next 14 days for date selection
+  const dates = Array.from({ length: 14 }, (_, i) => {
     const date = new Date()
-    date.setDate(date.getDate() + i + 1)
+    date.setDate(date.getDate() + i)
     return date
   })
   
-  const [selectedDate, setSelectedDate] = useState(dates[0].toISOString().split('T')[0])
-  
   const dayNames = ['Dom', 'Lun', 'Mar', 'Mie', 'Jue', 'Vie', 'Sab']
+
+  // Load match data
+  useEffect(() => {
+    async function loadMatch() {
+      try {
+        const response = await fetch(`/api/matches/${matchId}`)
+        if (!response.ok) {
+          throw new Error('Match not found')
+        }
+        const data: MatchData = await response.json()
+        
+        const matchDate = new Date(data.date_time)
+        setSelectedDate(matchDate.toISOString().split('T')[0])
+        
+        const hours = matchDate.getHours().toString().padStart(2, '0')
+        const minutes = matchDate.getMinutes().toString().padStart(2, '0')
+        const timeStr = `${hours}:${minutes}`
+        
+        // Check if time is in common times list
+        const isCommonTime = COMMON_TIMES.some(t => t.value === timeStr)
+        if (isCommonTime) {
+          setSelectedTime(timeStr)
+          setUseCustomTime(false)
+        } else {
+          setCustomTime(timeStr)
+          setUseCustomTime(true)
+        }
+        
+        setLocationType(data.location_type)
+        setLocationCustom(data.location_custom || '')
+        setVisibility(data.visibility || 'PUBLIC')
+      } catch {
+        setError('Error al cargar el partido')
+      } finally {
+        setLoadingMatch(false)
+      }
+    }
+    
+    loadMatch()
+  }, [matchId])
 
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault()
@@ -57,37 +109,45 @@ export default function NuevoPartidoPage() {
     formData.set('visibility', visibility)
     
     if (locationType === 'OTRO') {
-      const customLocation = (e.currentTarget.elements.namedItem('locationCustom') as HTMLInputElement)?.value
-      if (!customLocation) {
+      if (!locationCustom) {
         setError('Ingresa el nombre de la cancha')
         setLoading(false)
         return
       }
-      formData.set('locationCustom', customLocation)
+      formData.set('locationCustom', locationCustom)
     }
     
-    const result = await createMatch(formData)
+    const result = await updateMatch(parseInt(matchId), formData)
 
     if (result?.error) {
       setError(result.error)
       setLoading(false)
-    } else if (result?.redirect) {
-      router.push(result.redirect)
+    } else {
+      router.push(`/dashboard/partido/${matchId}`)
     }
+  }
+
+  if (loadingMatch) {
+    return (
+      <div className="flex flex-col items-center justify-center py-12 gap-4">
+        <Loader2 className="w-8 h-8 animate-spin text-primary" />
+        <p className="text-muted-foreground">Cargando partido...</p>
+      </div>
+    )
   }
 
   return (
     <div className="flex flex-col gap-4 pb-8">
-      <Link href="/dashboard" className="flex items-center gap-2 text-muted-foreground hover:text-foreground transition-colors w-fit">
+      <Link href={`/dashboard/partido/${matchId}`} className="flex items-center gap-2 text-muted-foreground hover:text-foreground transition-colors w-fit">
         <ArrowLeft className="w-4 h-4" />
         Volver
       </Link>
 
       <Card className="max-w-lg">
         <CardHeader>
-          <CardTitle className="text-foreground">Nuevo partido</CardTitle>
+          <CardTitle className="text-foreground">Editar partido</CardTitle>
           <CardDescription className="text-muted-foreground">
-            Crea un partido y convoca a los pibes
+            Modifica los detalles del partido
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -218,6 +278,8 @@ export default function NuevoPartidoPage() {
                   name="locationCustom"
                   type="text"
                   placeholder="Ej: Cancha del barrio"
+                  value={locationCustom}
+                  onChange={(e) => setLocationCustom(e.target.value)}
                   required={locationType === 'OTRO'}
                 />
               </div>
@@ -271,10 +333,10 @@ export default function NuevoPartidoPage() {
               {loading ? (
                 <span className="flex items-center gap-2">
                   <FootballLoader size="sm" />
-                  Creando partido...
+                  Guardando...
                 </span>
               ) : (
-                'Crear partido'
+                'Guardar cambios'
               )}
             </Button>
           </form>
