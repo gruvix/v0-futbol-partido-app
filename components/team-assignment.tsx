@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, type DragEvent } from 'react'
+import { useState, useRef, useCallback, type DragEvent } from 'react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
@@ -19,8 +19,10 @@ interface TeamAssignmentProps {
   participants: Participant[]
   isCreator: boolean
   isPast: boolean
-  onAssignTeam: (participantId: number, team: 'A' | 'B' | null) => void
+  onAssignTeam: (participantId: number, team: 'A' | 'B' | null) => Promise<void>
   title: string
+  showTeamColumns?: boolean // Whether to show team A/B columns
+  showPhoneNumbers?: boolean // Always show phone numbers
 }
 
 export function TeamAssignment({
@@ -29,50 +31,94 @@ export function TeamAssignment({
   isPast,
   onAssignTeam,
   title,
+  showTeamColumns = true,
+  showPhoneNumbers = true,
 }: TeamAssignmentProps) {
   const [draggedParticipantId, setDraggedParticipantId] = useState<number | null>(null)
   const [dragOverTeam, setDragOverTeam] = useState<'A' | 'B' | 'none' | null>(null)
+  const [isAssigning, setIsAssigning] = useState(false)
+  const dragTimeoutRef = useRef<NodeJS.Timeout | null>(null)
 
   const teamA = participants.filter(p => p.team === 'A')
   const teamB = participants.filter(p => p.team === 'B')
   const noTeam = participants.filter(p => !p.team)
 
   const hasTeams = teamA.length > 0 || teamB.length > 0
-  const canDrag = isCreator && !isPast
+  const canDrag = isCreator && !isPast && !isAssigning
+
+  // Reset drag state with timeout to prevent stuck state
+  const resetDragState = useCallback(() => {
+    if (dragTimeoutRef.current) {
+      clearTimeout(dragTimeoutRef.current)
+    }
+    dragTimeoutRef.current = setTimeout(() => {
+      setDraggedParticipantId(null)
+      setDragOverTeam(null)
+    }, 50)
+  }, [])
 
   // Drag handlers
   function handleDragStart(e: DragEvent<HTMLDivElement>, participantId: number) {
-    if (!canDrag) return
+    if (!canDrag) {
+      e.preventDefault()
+      return
+    }
     e.dataTransfer.effectAllowed = 'move'
     e.dataTransfer.setData('text/plain', participantId.toString())
-    setDraggedParticipantId(participantId)
+    // Small delay to allow the drag image to be set
+    requestAnimationFrame(() => {
+      setDraggedParticipantId(participantId)
+    })
   }
 
   function handleDragEnd() {
-    setDraggedParticipantId(null)
-    setDragOverTeam(null)
+    resetDragState()
   }
 
   function handleDragOver(e: DragEvent<HTMLDivElement>, team: 'A' | 'B' | 'none') {
-    if (!canDrag) return
+    if (!canDrag || draggedParticipantId === null) return
     e.preventDefault()
     e.dataTransfer.dropEffect = 'move'
-    setDragOverTeam(team)
+    if (dragOverTeam !== team) {
+      setDragOverTeam(team)
+    }
   }
 
-  function handleDragLeave() {
-    setDragOverTeam(null)
+  function handleDragLeave(e: DragEvent<HTMLDivElement>) {
+    // Only reset if leaving the drop zone entirely
+    const relatedTarget = e.relatedTarget as HTMLElement
+    if (!relatedTarget || !e.currentTarget.contains(relatedTarget)) {
+      setDragOverTeam(null)
+    }
   }
 
-  function handleDrop(e: DragEvent<HTMLDivElement>, team: 'A' | 'B' | null) {
+  async function handleDrop(e: DragEvent<HTMLDivElement>, team: 'A' | 'B' | null) {
     if (!canDrag) return
     e.preventDefault()
-    const participantId = parseInt(e.dataTransfer.getData('text/plain'), 10)
+    
+    const participantIdStr = e.dataTransfer.getData('text/plain')
+    const participantId = parseInt(participantIdStr, 10)
+    
+    resetDragState()
+    
     if (!isNaN(participantId)) {
-      onAssignTeam(participantId, team)
+      setIsAssigning(true)
+      try {
+        await onAssignTeam(participantId, team)
+      } finally {
+        setIsAssigning(false)
+      }
     }
-    setDraggedParticipantId(null)
-    setDragOverTeam(null)
+  }
+
+  async function handleButtonAssign(participantId: number, team: 'A' | 'B' | null) {
+    if (isAssigning) return
+    setIsAssigning(true)
+    try {
+      await onAssignTeam(participantId, team)
+    } finally {
+      setIsAssigning(false)
+    }
   }
 
   // Draggable player badge component
@@ -96,7 +142,7 @@ export function TeamAssignment({
     return (
       <div 
         className={cn(
-          "flex items-center gap-1 transition-opacity",
+          "flex items-center gap-1 transition-opacity select-none",
           isDragging && "opacity-50"
         )}
         draggable={canDrag}
@@ -109,20 +155,24 @@ export function TeamAssignment({
             "py-1.5 px-3 transition-all",
             badgeStyles[variant],
             canDrag && "cursor-grab active:cursor-grabbing pl-1.5",
-            canDrag && !isPast && variant !== 'noTeam' && "pr-1"
+            canDrag && variant !== 'noTeam' && "pr-1"
           )}
         >
           {canDrag && (
             <GripVertical className="w-3 h-3 mr-1 text-muted-foreground" />
           )}
           {participant.name}
-          {variant === 'noTeam' && !hasTeams && ` (${participant.phone_last_four})`}
+          {showPhoneNumbers && ` (${participant.phone_last_four})`}
           {canDrag && variant !== 'noTeam' && (
             <Button
               variant="ghost"
               size="sm"
               className="h-5 w-5 p-0 ml-1 text-xs hover:bg-destructive/20 hover:text-destructive"
-              onClick={() => onAssignTeam(participant.id, null)}
+              onClick={(e) => {
+                e.stopPropagation()
+                handleButtonAssign(participant.id, null)
+              }}
+              disabled={isAssigning}
             >
               x
             </Button>
@@ -134,7 +184,8 @@ export function TeamAssignment({
               variant="ghost"
               size="sm"
               className="h-6 w-6 p-0 text-xs bg-primary/10 text-primary hover:bg-primary/20"
-              onClick={() => onAssignTeam(participant.id, 'A')}
+              onClick={() => handleButtonAssign(participant.id, 'A')}
+              disabled={isAssigning}
             >
               A
             </Button>
@@ -142,7 +193,8 @@ export function TeamAssignment({
               variant="ghost"
               size="sm"
               className="h-6 w-6 p-0 text-xs bg-accent/30 text-accent-foreground hover:bg-accent/50"
-              onClick={() => onAssignTeam(participant.id, 'B')}
+              onClick={() => handleButtonAssign(participant.id, 'B')}
+              disabled={isAssigning}
             >
               B
             </Button>
@@ -184,26 +236,33 @@ export function TeamAssignment({
     )
   }
 
-  if (!hasTeams) {
+  // Simple list without teams (for substitutes/extras or when teams disabled)
+  if (!showTeamColumns || !hasTeams) {
     return (
       <div className="flex flex-col gap-2">
-        <h4 className="text-sm font-medium text-muted-foreground">{title}</h4>
-        <div className="flex flex-wrap gap-2">
-          {participants.map((p) => (
-            <PlayerBadge 
-              key={p.id} 
-              participant={p} 
-              variant="noTeam" 
-              showButtons={true}
-            />
-          ))}
-        </div>
+        <h4 className="text-sm font-medium text-muted-foreground">{title} ({participants.length})</h4>
+        <DropZone team="none">
+          <div className="flex flex-wrap gap-2 p-1">
+            {participants.map((p) => (
+              <PlayerBadge 
+                key={p.id} 
+                participant={p} 
+                variant="noTeam" 
+                showButtons={showTeamColumns}
+              />
+            ))}
+            {participants.length === 0 && (
+              <p className="text-xs text-muted-foreground p-2">Sin jugadores</p>
+            )}
+          </div>
+        </DropZone>
       </div>
     )
   }
 
   return (
     <div className="flex flex-col gap-4">
+      <h4 className="text-sm font-medium text-muted-foreground">{title} ({participants.length})</h4>
       <div className="grid grid-cols-2 gap-4">
         {/* Team A */}
         <div className="flex flex-col gap-2">
@@ -249,7 +308,7 @@ export function TeamAssignment({
       {/* Unassigned players */}
       {noTeam.length > 0 && (
         <div className="flex flex-col gap-2">
-          <h4 className="text-sm font-medium text-muted-foreground">Sin equipo</h4>
+          <h4 className="text-sm font-medium text-muted-foreground">Sin equipo ({noTeam.length})</h4>
           <DropZone team="none">
             <div className="flex flex-wrap gap-2 p-1">
               {noTeam.map((p) => (
