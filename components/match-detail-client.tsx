@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useCallback } from 'react'
+import { useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
@@ -14,7 +14,6 @@ import {
   ArrowLeft, 
   MapPin, 
   Calendar, 
-  Clock, 
   Users, 
   Shuffle, 
   Trash2,
@@ -37,7 +36,8 @@ import {
   updateMatchField,
   resetTeamsToSubstitutes,
   addMatchAdmin,
-  removeMatchAdmin
+  removeMatchAdmin,
+  changeParticipantRole
 } from '@/app/actions/matches'
 import { TeamAssignment } from '@/components/team-assignment'
 import { InvitePlayersDialog } from '@/components/invite-players-dialog'
@@ -66,6 +66,8 @@ interface Match {
   is_public: boolean
   team_count: number
   team_size: number
+  max_players: number
+  invites_per_player: number | null
 }
 
 interface Participant {
@@ -125,6 +127,7 @@ export function MatchDetailClient({
   const [showLastPlayerConfirm, setShowLastPlayerConfirm] = useState(false)
   const [showLeaveConfirm, setShowLeaveConfirm] = useState(false)
   const [showTeamResetWarning, setShowTeamResetWarning] = useState<{field: string, value: number} | null>(null)
+  const [showAdminConfirm, setShowAdminConfirm] = useState<{userId: number, isCurrentlyAdmin: boolean} | null>(null)
   const router = useRouter()
   const { showLoader, hideLoader } = useActionLoader()
 
@@ -138,6 +141,8 @@ export function MatchDetailClient({
   const [editUseCustomTeamCount, setEditUseCustomTeamCount] = useState(false)
   const [editTeamSize, setEditTeamSize] = useState(match.team_size)
   const [editCustomTeamSize, setEditCustomTeamSize] = useState('')
+  const [editMaxPlayers, setEditMaxPlayers] = useState(match.max_players.toString())
+  const [editInvitesPerPlayer, setEditInvitesPerPlayer] = useState(match.invites_per_player === null ? '' : match.invites_per_player.toString())
   const [editUseCustomTeamSize, setEditUseCustomTeamSize] = useState(false)
   const [editIsPublic, setEditIsPublic] = useState(match.is_public)
   
@@ -180,9 +185,25 @@ export function MatchDetailClient({
   // Display title - fallback to "Partido de [creator]"
   const displayTitle = match.title || `Partido de ${match.creator_name}`
 
-  const players = participants.filter(p => p.role === 'PLAYER')
-  const substitutes = participants.filter(p => p.role === 'SUBSTITUTE')
-  const extras = participants.filter(p => p.role === 'EXTRA')
+  // Optimistic local state for team assignments
+  const [optimisticOverrides, setOptimisticOverrides] = useState<Record<number, { team: 'A' | 'B' | null; role?: 'PLAYER' | 'SUBSTITUTE' }>>({})
+  const [loadingParticipantIds, setLoadingParticipantIds] = useState<Set<number>>(new Set())
+
+  // Apply optimistic overrides to participants
+  const effectiveParticipants = participants.map(p => {
+    if (optimisticOverrides[p.id]) {
+      const override = optimisticOverrides[p.id]
+      return { ...p, team: override.team, ...(override.role ? { role: override.role } : {}) }
+    }
+    return p
+  })
+
+  const players = effectiveParticipants.filter(p => p.role === 'PLAYER')
+  const substitutes = effectiveParticipants.filter(p => p.role === 'SUBSTITUTE')
+  const extras = effectiveParticipants.filter(p => p.role === 'EXTRA')
+
+  // Calculate max players: use match.max_players which is always set
+  const maxPlayers = match.max_players
 
   // Generate edit dates
   const editDates = Array.from({ length: 7 }, (_, i) => {
@@ -192,28 +213,6 @@ export function MatchDetailClient({
   })
   const canEditGoForward = editWeekOffset < 4
   const canEditGoBack = editWeekOffset > 0
-
-  // Reset edit states to match values
-  const resetEditStates = useCallback(() => {
-    setEditTitle(match.title || '')
-    setEditLocationType(match.location_type)
-    setEditLocationCustom(match.location_custom || '')
-    setEditField(match.field || '')
-    setEditTeamCount(match.team_count)
-    setEditCustomTeamCount('')
-    setEditUseCustomTeamCount(false)
-    setEditTeamSize(match.team_size)
-    setEditCustomTeamSize('')
-    setEditUseCustomTeamSize(false)
-    setEditIsPublic(match.is_public)
-    const d = new Date(match.date_time)
-    setEditSelectedDate(`${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`)
-    setEditSelectedTime(`${String(d.getUTCHours()).padStart(2, '0')}:${String(d.getUTCMinutes()).padStart(2, '0')}`)
-    setEditUseCustomTime(false)
-    setEditCustomHour(String(d.getUTCHours()).padStart(2, '0'))
-    setEditCustomMinute(String(d.getUTCMinutes()).padStart(2, '0'))
-    setEditWeekOffset(0)
-  }, [match])
 
   async function handleJoin(role: 'PLAYER' | 'SUBSTITUTE' | 'EXTRA') {
     setLoading(`join-${role}`)
@@ -276,13 +275,90 @@ export function MatchDetailClient({
   }
 
   async function handleAssignTeam(participantId: number, team: 'A' | 'B' | null) {
+    // Optimistic: move player in UI immediately, show spinner on their badge
+    setOptimisticOverrides(prev => ({ ...prev, [participantId]: { team } }))
+    setLoadingParticipantIds(prev => {
+      const next = new Set(prev)
+      next.add(participantId)
+      return next
+    })
+
     const result = await assignTeam(match.id, participantId, team)
+
+    // Remove loading spinner but keep optimistic override to avoid jump-back
+    setLoadingParticipantIds(prev => {
+      const next = new Set(prev)
+      next.delete(participantId)
+      return next
+    })
+
     if (result?.error) {
+      // Revert optimistic override on error
+      setOptimisticOverrides(prev => {
+        const next = { ...prev }
+        delete next[participantId]
+        return next
+      })
+      setError(result.error)
+    }
+    // On success, keep the override - it will be consistent with the revalidated data
+    // and will be cleaned up when participants prop changes
+  }
+
+  async function handlePromoteToPlayer(participantId: number) {
+    setOptimisticOverrides(prev => ({ ...prev, [participantId]: { team: null, role: 'PLAYER' } }))
+    setLoadingParticipantIds(prev => {
+      const next = new Set(prev)
+      next.add(participantId)
+      return next
+    })
+    const result = await changeParticipantRole(match.id, participantId, 'PLAYER')
+    setLoadingParticipantIds(prev => {
+      const next = new Set(prev)
+      next.delete(participantId)
+      return next
+    })
+    if (result?.error) {
+      setOptimisticOverrides(prev => {
+        const next = { ...prev }
+        delete next[participantId]
+        return next
+      })
       setError(result.error)
     }
   }
 
-  async function handleToggleAdmin(userId: number, isCurrentlyAdmin: boolean) {
+  async function handleDemoteToSubstitute(participantId: number) {
+    setOptimisticOverrides(prev => ({ ...prev, [participantId]: { team: null, role: 'SUBSTITUTE' } }))
+    setLoadingParticipantIds(prev => {
+      const next = new Set(prev)
+      next.add(participantId)
+      return next
+    })
+    const result = await changeParticipantRole(match.id, participantId, 'SUBSTITUTE')
+    setLoadingParticipantIds(prev => {
+      const next = new Set(prev)
+      next.delete(participantId)
+      return next
+    })
+    if (result?.error) {
+      setOptimisticOverrides(prev => {
+        const next = { ...prev }
+        delete next[participantId]
+        return next
+      })
+      setError(result.error)
+    }
+  }
+
+  function handleToggleAdmin(userId: number, isCurrentlyAdmin: boolean) {
+    setShowAdminConfirm({ userId, isCurrentlyAdmin })
+  }
+
+  async function confirmToggleAdmin() {
+    if (!showAdminConfirm) return
+    const { userId, isCurrentlyAdmin } = showAdminConfirm
+    setShowAdminConfirm(null)
     if (isCurrentlyAdmin) {
       const result = await removeMatchAdmin(match.id, userId)
       if (result?.error) {
@@ -298,7 +374,6 @@ export function MatchDetailClient({
 
   // Handle team config changes with warning
   async function handleTeamConfigChange(field: 'team_count' | 'team_size', value: number) {
-    // If there are players, show warning
     if (players.length > 0) {
       setShowTeamResetWarning({ field, value })
     } else {
@@ -721,6 +796,66 @@ export function MatchDetailClient({
                 )}
               />
             )}
+
+            {/* Max players */}
+            <EditableField
+              icon={<Users className="w-4 h-4 text-primary" />}
+              displayValue={<span className="text-foreground text-sm">Max {match.max_players} jugadores</span>}
+              canEdit={isAdmin && !isPast}
+              onSave={async () => {
+                const val = parseInt(editMaxPlayers)
+                if (!isNaN(val) && val !== match.max_players) {
+                  await handleFieldSave('max_players', val)
+                }
+              }}
+              renderEditor={() => (
+                <Input
+                  type="number"
+                  min="2"
+                  max="100"
+                  defaultValue={match.max_players}
+                  onChange={(e) => setEditMaxPlayers(e.target.value)}
+                  placeholder="Max jugadores"
+                />
+              )}
+            />
+
+            {/* Invites per player */}
+            <EditableField
+              icon={<Users className="w-4 h-4 text-primary" />}
+              displayValue={
+                <span className="text-foreground text-sm">
+                  {match.invites_per_player === null ? 'Invitaciones: sin limite' : `${match.invites_per_player} invitacion(es) por jugador`}
+                </span>
+              }
+              canEdit={isAdmin && !isPast}
+              onSave={async () => {
+                const val = editInvitesPerPlayer === '' ? null : parseInt(editInvitesPerPlayer)
+                if (val !== match.invites_per_player) {
+                  await handleFieldSave('invites_per_player', val)
+                }
+              }}
+              renderEditor={() => (
+                <div className="flex flex-col gap-2">
+                  <div className="grid grid-cols-4 gap-1">
+                    {[null, 1, 2, 3].map((n) => (
+                      <button
+                        key={n === null ? 'null' : n}
+                        type="button"
+                        onClick={() => setEditInvitesPerPlayer(n === null ? '' : n.toString())}
+                        className={`py-1.5 px-2 rounded-lg border-2 text-xs font-medium transition-all ${
+                          (n === null && editInvitesPerPlayer === '') || (n !== null && editInvitesPerPlayer === n.toString())
+                            ? 'border-primary bg-primary/10 text-primary'
+                            : 'border-border hover:border-primary/50 hover:bg-muted/50'
+                        }`}
+                      >
+                        {n === null ? 'Sin limite' : n}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+            />
           </div>
 
           {/* Join buttons (only when not in match) */}
@@ -807,112 +942,33 @@ export function MatchDetailClient({
               </div>
             </div>
 
-            {/* Dynamic team lists based on team_count */}
-            {match.team_count === 0 ? (
-              // No teams - show single players list
-              <>
-                {players.length > 0 && (
-                  <div className="flex flex-col gap-2">
-                    <h4 className="text-sm font-medium text-muted-foreground">Jugadores</h4>
-                    <div className="flex flex-wrap gap-2">
-                      {players.map((p) => {
-                        const isParticipantAdmin = admins.some(a => a.user_id === p.user_id)
-                        return (
-                          <div key={p.id} className="flex items-center gap-1">
-                            <Badge variant="default" className="py-1.5 px-3">
-                              {p.name} ({p.phone_last_four})
-                              {isParticipantAdmin && <Shield className="w-3 h-3 ml-1" />}
-                            </Badge>
-                            {isAdmin && !isPast && p.user_id !== match.created_by_user_id && (
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                className="h-6 w-6 p-0"
-                                onClick={() => handleToggleAdmin(p.user_id, isParticipantAdmin)}
-                                title={isParticipantAdmin ? 'Quitar admin' : 'Hacer admin'}
-                              >
-                                <Shield className={`w-3 h-3 ${isParticipantAdmin ? 'text-primary' : 'text-muted-foreground'}`} />
-                              </Button>
-                            )}
-                          </div>
-                        )
-                      })}
-                    </div>
-                  </div>
-                )}
-              </>
-            ) : (
-              // Teams configured - show team assignment
-              <TeamAssignment
-                participants={players}
-                isAdmin={isAdmin}
-                isPast={isPast}
-                onAssignTeam={handleAssignTeam}
-                teamCount={match.team_count}
-                teamSize={match.team_size}
-                title="Jugadores"
-                admins={admins}
-                matchCreatorId={match.created_by_user_id}
-                onToggleAdmin={handleToggleAdmin}
-              />
-            )}
-
-            {substitutes.length > 0 && (
-              <div className="flex flex-col gap-2">
-                <h4 className="text-sm font-medium text-muted-foreground">Suplentes</h4>
-                <div className="flex flex-wrap gap-2">
-                  {substitutes.map((p) => {
-                    const isParticipantAdmin = admins.some(a => a.user_id === p.user_id)
-                    return (
-                      <div key={p.id} className="flex items-center gap-1">
-                        <Badge variant="secondary" className="py-1.5 px-3">
-                          {p.name} ({p.phone_last_four})
-                          {isParticipantAdmin && <Shield className="w-3 h-3 ml-1" />}
-                        </Badge>
-                        {isAdmin && !isPast && p.user_id !== match.created_by_user_id && (
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            className="h-6 w-6 p-0"
-                            onClick={() => handleToggleAdmin(p.user_id, isParticipantAdmin)}
-                            title={isParticipantAdmin ? 'Quitar admin' : 'Hacer admin'}
-                          >
-                            <Shield className={`w-3 h-3 ${isParticipantAdmin ? 'text-primary' : 'text-muted-foreground'}`} />
-                          </Button>
-                        )}
-                      </div>
-                    )
-                  })}
-                </div>
-              </div>
-            )}
+            {/* Dynamic team lists - TeamAssignment handles all cases including subs */}
+            <TeamAssignment
+              participants={players}
+              substitutes={substitutes}
+              isAdmin={isAdmin}
+              isPast={isPast}
+              onAssignTeam={handleAssignTeam}
+              onPromoteToPlayer={handlePromoteToPlayer}
+              onDemoteToSubstitute={handleDemoteToSubstitute}
+              teamCount={match.team_count}
+              teamSize={match.team_size}
+              maxPlayers={maxPlayers}
+              admins={admins}
+              matchCreatorId={match.created_by_user_id}
+              onToggleAdmin={handleToggleAdmin}
+              loadingParticipantIds={loadingParticipantIds}
+            />
 
             {extras.length > 0 && (
               <div className="flex flex-col gap-2">
-                <h4 className="text-sm font-medium text-muted-foreground">Por las dudas</h4>
+                <h4 className="text-sm font-medium text-muted-foreground">Por las dudas ({extras.length})</h4>
                 <div className="flex flex-wrap gap-2">
-                  {extras.map((p) => {
-                    const isParticipantAdmin = admins.some(a => a.user_id === p.user_id)
-                    return (
-                      <div key={p.id} className="flex items-center gap-1">
-                        <Badge variant="outline" className="py-1.5 px-3">
-                          {p.name} ({p.phone_last_four})
-                          {isParticipantAdmin && <Shield className="w-3 h-3 ml-1" />}
-                        </Badge>
-                        {isAdmin && !isPast && p.user_id !== match.created_by_user_id && (
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            className="h-6 w-6 p-0"
-                            onClick={() => handleToggleAdmin(p.user_id, isParticipantAdmin)}
-                            title={isParticipantAdmin ? 'Quitar admin' : 'Hacer admin'}
-                          >
-                            <Shield className={`w-3 h-3 ${isParticipantAdmin ? 'text-primary' : 'text-muted-foreground'}`} />
-                          </Button>
-                        )}
-                      </div>
-                    )
-                  })}
+                  {extras.map((p) => (
+                    <Badge key={p.id} variant="outline" className="py-1.5 px-3">
+                      {p.name} ({p.phone_last_four})
+                    </Badge>
+                  ))}
                 </div>
               </div>
             )}
@@ -934,7 +990,7 @@ export function MatchDetailClient({
                     className="gap-2 text-destructive hover:text-destructive hover:bg-destructive/10"
                   >
                     <Trash2 className="w-4 h-4" />
-                    Eliminar
+                    Eliminar partido
                   </Button>
                 )}
                 {userParticipation && (
@@ -950,7 +1006,7 @@ export function MatchDetailClient({
                     ) : (
                       <UserMinus className="w-4 h-4" />
                     )}
-                    Abandonar
+                    Abandonar partido
                   </Button>
                 )}
               </div>
@@ -963,6 +1019,9 @@ export function MatchDetailClient({
         open={showInviteDialog}
         onOpenChange={setShowInviteDialog}
         matchId={match.id}
+        currentParticipantIds={participants.map(p => p.user_id)}
+        invitesPerPlayer={match.invites_per_player}
+        currentUserId={currentUserId}
       />
 
       {/* Delete Confirmation Dialog */}
@@ -1032,6 +1091,28 @@ export function MatchDetailClient({
             <AlertDialogCancel>Cancelar</AlertDialogCancel>
             <AlertDialogAction onClick={confirmTeamReset}>
               Continuar
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Admin Toggle Confirmation Dialog */}
+      <AlertDialog open={showAdminConfirm !== null} onOpenChange={() => setShowAdminConfirm(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              {showAdminConfirm?.isCurrentlyAdmin ? 'Quitar administrador' : 'Hacer administrador'}
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              {showAdminConfirm?.isCurrentlyAdmin
+                ? 'Seguro que queres quitar los permisos de administrador a este jugador?'
+                : 'Seguro que queres hacer administrador a este jugador? Podra modificar el partido y mover jugadores.'}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogAction onClick={confirmToggleAdmin}>
+              {showAdminConfirm?.isCurrentlyAdmin ? 'Quitar admin' : 'Hacer admin'}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

@@ -19,6 +19,9 @@ export async function createMatch(formData: FormData) {
   const titleInput = formData.get('title') as string
   const teamCount = parseInt(formData.get('teamCount') as string) || 0
   const teamSize = parseInt(formData.get('teamSize') as string) || 5
+  const maxPlayers = parseInt(formData.get('maxPlayers') as string) || 10
+  const invitesPerPlayerStr = formData.get('invitesPerPlayer') as string
+  const invitesPerPlayer = invitesPerPlayerStr ? parseInt(invitesPerPlayerStr) : null
 
   // Get creator's name for default title
   const user = await sql`SELECT name FROM users WHERE id = ${session.userId}`
@@ -37,8 +40,8 @@ export async function createMatch(formData: FormData) {
 
   try {
     const result = await sql`
-      INSERT INTO matches (created_by_user_id, date_time, location_type, location_custom, field, is_public, title, team_count, team_size)
-      VALUES (${session.userId}, ${dateTime.toISOString()}, ${locationType}, ${locationCustom || null}, ${field || null}, ${isPublic}, ${title}, ${teamCount}, ${teamSize})
+      INSERT INTO matches (created_by_user_id, date_time, location_type, location_custom, field, is_public, title, team_count, team_size, max_players, invites_per_player)
+      VALUES (${session.userId}, ${dateTime.toISOString()}, ${locationType}, ${locationCustom || null}, ${field || null}, ${isPublic}, ${title}, ${teamCount}, ${teamSize}, ${maxPlayers}, ${invitesPerPlayer})
       RETURNING id
     `
     
@@ -252,9 +255,30 @@ export async function invitePlayer(matchId: number, userId: number, role: 'PLAYE
       return { error: 'Este jugador ya esta anotado' }
     }
 
+    // Check invite limit per player
+    const matchData = await sql`SELECT invites_per_player FROM matches WHERE id = ${matchId}`
+    const invitesPerPlayer = matchData[0]?.invites_per_player
+    
+    if (invitesPerPlayer !== null && invitesPerPlayer !== undefined) {
+      const inviteCount = await sql`
+        SELECT COUNT(*) as count FROM match_invites 
+        WHERE match_id = ${matchId} AND inviter_user_id = ${session.userId}
+      `
+      if (Number(inviteCount[0].count) >= invitesPerPlayer) {
+        return { error: `Ya invitaste el maximo de ${invitesPerPlayer} jugador(es)` }
+      }
+    }
+
     await sql`
       INSERT INTO match_participants (match_id, user_id, role)
       VALUES (${matchId}, ${userId}, ${role})
+    `
+
+    // Track the invite
+    await sql`
+      INSERT INTO match_invites (match_id, inviter_user_id, invited_user_id)
+      VALUES (${matchId}, ${session.userId}, ${userId})
+      ON CONFLICT (match_id, inviter_user_id, invited_user_id) DO NOTHING
     `
 
     revalidatePath(`/dashboard/partido/${matchId}`, 'max')
@@ -333,7 +357,7 @@ export async function updateMatchField(
   }
 
   // Whitelist of allowed fields
-  const allowedFields = ['title', 'date_time', 'location_type', 'location_custom', 'field', 'team_count', 'team_size', 'is_public']
+  const allowedFields = ['title', 'date_time', 'location_type', 'location_custom', 'field', 'team_count', 'team_size', 'is_public', 'max_players', 'invites_per_player']
   if (!allowedFields.includes(field)) {
     return { error: 'Campo no permitido' }
   }
@@ -356,6 +380,10 @@ export async function updateMatchField(
       await sql`UPDATE matches SET team_size = ${value as number} WHERE id = ${matchId}`
     } else if (field === 'is_public') {
       await sql`UPDATE matches SET is_public = ${value as boolean} WHERE id = ${matchId}`
+    } else if (field === 'max_players') {
+      await sql`UPDATE matches SET max_players = ${value as number} WHERE id = ${matchId}`
+    } else if (field === 'invites_per_player') {
+      await sql`UPDATE matches SET invites_per_player = ${value as number | null} WHERE id = ${matchId}`
     }
 
     revalidatePath(`/dashboard/partido/${matchId}`, 'max')
@@ -470,6 +498,45 @@ export async function getMatchAdmins(matchId: number) {
   } catch (error) {
     console.error('Error getting admins:', error)
     return { admins: [] }
+  }
+}
+
+// Change participant role (promote sub to player, demote player to sub)
+export async function changeParticipantRole(matchId: number, participantId: number, newRole: 'PLAYER' | 'SUBSTITUTE') {
+  const session = await getSession()
+  if (!session) {
+    return { error: 'No autenticado' }
+  }
+
+  const admin = await isMatchAdmin(matchId)
+  if (!admin) {
+    return { error: 'Solo los administradores pueden mover jugadores' }
+  }
+
+  try {
+    await sql`
+      UPDATE match_participants 
+      SET role = ${newRole}, team = NULL, team_number = NULL
+      WHERE id = ${participantId} AND match_id = ${matchId}
+    `
+    revalidatePath(`/dashboard/partido/${matchId}`, 'max')
+    return { success: true }
+  } catch (error) {
+    console.error('Error changing role:', error)
+    return { error: 'Error al cambiar rol' }
+  }
+}
+
+// Get invite count for a user in a match
+export async function getInviteCount(matchId: number, userId: number) {
+  try {
+    const result = await sql`
+      SELECT COUNT(*) as count FROM match_invites 
+      WHERE match_id = ${matchId} AND inviter_user_id = ${userId}
+    `
+    return { count: Number(result[0].count) }
+  } catch {
+    return { count: 0 }
   }
 }
 

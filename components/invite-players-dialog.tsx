@@ -10,7 +10,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
-import { getAllUsers, invitePlayer } from '@/app/actions/matches'
+import { getAllUsers, invitePlayer, getInviteCount } from '@/app/actions/matches'
 import { FootballLoader, InlineLoader } from '@/components/football-loader'
 import { Check, UserPlus, Search } from 'lucide-react'
 
@@ -25,6 +25,8 @@ interface InvitePlayersDialogProps {
   onOpenChange: (open: boolean) => void
   matchId: number
   currentParticipantIds: number[]
+  invitesPerPlayer?: number | null
+  currentUserId: number
 }
 
 export function InvitePlayersDialog({
@@ -32,6 +34,8 @@ export function InvitePlayersDialog({
   onOpenChange,
   matchId,
   currentParticipantIds,
+  invitesPerPlayer,
+  currentUserId,
 }: InvitePlayersDialogProps) {
   const [users, setUsers] = useState<User[]>([])
   const [loadingUsers, setLoadingUsers] = useState(false)
@@ -39,14 +43,22 @@ export function InvitePlayersDialog({
   const [invitedIds, setInvitedIds] = useState<number[]>([])
   const [search, setSearch] = useState('')
   const [error, setError] = useState('')
+  const [myInviteCount, setMyInviteCount] = useState(0)
+
+  const hasLimit = invitesPerPlayer !== null && invitesPerPlayer !== undefined
+  const remainingInvites = hasLimit ? invitesPerPlayer - (myInviteCount + invitedIds.length) : Infinity
+  const reachedLimit = hasLimit && remainingInvites <= 0
 
   useEffect(() => {
     if (open) {
       loadUsers()
       setInvitedIds([])
       setSearch('')
+      if (hasLimit) {
+        getInviteCount(matchId, currentUserId).then(r => setMyInviteCount(r.count))
+      }
     }
-  }, [open])
+  }, [open, hasLimit, matchId, currentUserId])
 
   async function loadUsers() {
     setLoadingUsers(true)
@@ -85,7 +97,9 @@ export function InvitePlayersDialog({
         <DialogHeader>
           <DialogTitle>Invitar jugadores</DialogTitle>
           <DialogDescription>
-            Agrega jugadores al partido
+            {hasLimit 
+              ? `Podes invitar ${remainingInvites > 0 ? remainingInvites : 0} jugador(es) mas (limite: ${invitesPerPlayer} por persona)`
+              : 'Agrega jugadores al partido'}
           </DialogDescription>
         </DialogHeader>
 
@@ -131,7 +145,7 @@ export function InvitePlayersDialog({
                       size="sm"
                       variant={isInvited ? "secondary" : "default"}
                       onClick={() => handleInvite(user.id)}
-                      disabled={isInviting || isInvited}
+                      disabled={isInviting || isInvited || reachedLimit}
                       className="gap-2"
                     >
                       {isInviting ? (

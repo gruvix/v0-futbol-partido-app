@@ -15,6 +15,8 @@ interface Match {
   is_public: boolean
   team_count: number
   team_size: number
+  max_players: number
+  invites_per_player: number | null
 }
 
 interface Participant {
@@ -46,6 +48,8 @@ async function getMatch(id: number): Promise<Match | null> {
       m.is_public,
       m.team_count,
       m.team_size,
+      m.max_players,
+      m.invites_per_player,
       u.name as creator_name
     FROM matches m
     JOIN users u ON m.created_by_user_id = u.id

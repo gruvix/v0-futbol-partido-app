@@ -8,8 +8,6 @@ interface MatchSummary {
   location_type: string
   location_custom: string | null
   participant_count: number
-  title: string | null
-  creator_name: string
 }
 
 async function getMatchesForCalendar(): Promise<MatchSummary[]> {
@@ -20,14 +18,11 @@ async function getMatchesForCalendar(): Promise<MatchSummary[]> {
       m.date_time,
       m.location_type,
       m.location_custom,
-      m.title,
-      u.name as creator_name,
       COUNT(mp.id)::int as participant_count
     FROM matches m
-    JOIN users u ON m.created_by_user_id = u.id
     LEFT JOIN match_participants mp ON m.id = mp.match_id
     WHERE m.date_time >= NOW() - INTERVAL '30 days'
-    GROUP BY m.id, u.name
+    GROUP BY m.id
     ORDER BY m.date_time ASC
   `
   return matches as MatchSummary[]

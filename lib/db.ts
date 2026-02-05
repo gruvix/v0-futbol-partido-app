@@ -70,6 +70,8 @@ export async function initializeDatabase() {
       is_public BOOLEAN DEFAULT true,
       team_count INTEGER DEFAULT 0,
       team_size INTEGER DEFAULT 5,
+      max_players INTEGER DEFAULT 10,
+      invites_per_player INTEGER,
       created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
     )
   `
@@ -84,6 +86,18 @@ export async function initializeDatabase() {
       UNIQUE(match_id, user_id)
     )
   `
+
+  // Track who invited whom (for invite limits)
+  await sql`
+    CREATE TABLE IF NOT EXISTS match_invites (
+      id SERIAL PRIMARY KEY,
+      match_id INTEGER NOT NULL REFERENCES matches(id) ON DELETE CASCADE,
+      inviter_user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      invited_user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+      UNIQUE(match_id, inviter_user_id, invited_user_id)
+    )
+  `
   
   // Add columns if they don't exist (for existing databases)
   try {
@@ -93,6 +107,8 @@ export async function initializeDatabase() {
     await sql`ALTER TABLE matches ADD COLUMN IF NOT EXISTS team_count INTEGER DEFAULT 0`
     await sql`ALTER TABLE matches ADD COLUMN IF NOT EXISTS team_size INTEGER DEFAULT 5`
     await sql`ALTER TABLE matches ADD COLUMN IF NOT EXISTS field VARCHAR(100)`
+    await sql`ALTER TABLE matches ADD COLUMN IF NOT EXISTS max_players INTEGER DEFAULT 10`
+    await sql`ALTER TABLE matches ADD COLUMN IF NOT EXISTS invites_per_player INTEGER`
     await sql`ALTER TABLE match_participants ADD COLUMN IF NOT EXISTS team_number INTEGER`
   } catch {
     // Columns might already exist

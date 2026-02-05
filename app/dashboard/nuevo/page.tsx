@@ -47,6 +47,10 @@ export default function NuevoPartidoPage() {
   const [teamSize, setTeamSize] = useState(5)
   const [customTeamSize, setCustomTeamSize] = useState('')
   const [useCustomTeamSize, setUseCustomTeamSize] = useState(false)
+  const [maxPlayers, setMaxPlayers] = useState(10)
+  const [customMaxPlayers, setCustomMaxPlayers] = useState('')
+  const [useCustomMaxPlayers, setUseCustomMaxPlayers] = useState(false)
+  const [invitesPerPlayer, setInvitesPerPlayer] = useState<number | null>(null) // null = unlimited
   const [userName, setUserName] = useState('')
   const [weekOffset, setWeekOffset] = useState(0) // 0 = this week, 1 = next week, etc.
   const router = useRouter()
@@ -99,6 +103,11 @@ export default function NuevoPartidoPage() {
     formData.set('teamCount', actualTeamCount.toString())
     const finalTeamSize = useCustomTeamSize && customTeamSize ? parseInt(customTeamSize) : teamSize
     formData.set('teamSize', finalTeamSize.toString())
+    const finalMaxPlayers = useCustomMaxPlayers && customMaxPlayers ? parseInt(customMaxPlayers) : maxPlayers
+    formData.set('maxPlayers', finalMaxPlayers.toString())
+    if (invitesPerPlayer !== null) {
+      formData.set('invitesPerPlayer', invitesPerPlayer.toString())
+    }
     
     if (locationType === 'OTRO') {
       const customLocation = (e.currentTarget.elements.namedItem('locationCustom') as HTMLInputElement)?.value
@@ -456,6 +465,95 @@ export default function NuevoPartidoPage() {
                   )}
                 </div>
               )}
+            </div>
+
+            {/* Max players */}
+            <div className="flex flex-col gap-3">
+              <Label className="flex items-center gap-2">
+                <Users className="w-4 h-4 text-primary" />
+                Maximo de jugadores
+              </Label>
+              <div className="grid grid-cols-4 gap-2">
+                {[10, 14, 20].map((n) => (
+                  <button
+                    key={n}
+                    type="button"
+                    onClick={() => {
+                      setMaxPlayers(n)
+                      setUseCustomMaxPlayers(false)
+                    }}
+                    className={`py-2 px-3 rounded-lg border-2 font-medium transition-all ${
+                      !useCustomMaxPlayers && maxPlayers === n
+                        ? 'border-primary bg-primary/10 text-primary'
+                        : 'border-border hover:border-primary/50 hover:bg-muted/50'
+                    }`}
+                  >
+                    {n}
+                  </button>
+                ))}
+                <button
+                  type="button"
+                  onClick={() => setUseCustomMaxPlayers(true)}
+                  className={`py-2 px-3 rounded-lg border-2 font-medium transition-all ${
+                    useCustomMaxPlayers
+                      ? 'border-primary bg-primary/10 text-primary'
+                      : 'border-border hover:border-primary/50 hover:bg-muted/50'
+                  }`}
+                >
+                  Otro
+                </button>
+              </div>
+              {useCustomMaxPlayers && (
+                <Input
+                  type="number"
+                  min="2"
+                  max="100"
+                  value={customMaxPlayers}
+                  onChange={(e) => setCustomMaxPlayers(e.target.value)}
+                  placeholder="Maximo de jugadores"
+                  className="mt-1"
+                />
+              )}
+            </div>
+
+            {/* Invites per player */}
+            <div className="flex flex-col gap-3">
+              <Label className="flex items-center gap-2">
+                <Users className="w-4 h-4 text-primary" />
+                Invitaciones por jugador
+              </Label>
+              <div className="grid grid-cols-4 gap-2">
+                <button
+                  type="button"
+                  onClick={() => setInvitesPerPlayer(null)}
+                  className={`py-2 px-3 rounded-lg border-2 font-medium transition-all ${
+                    invitesPerPlayer === null
+                      ? 'border-primary bg-primary/10 text-primary'
+                      : 'border-border hover:border-primary/50 hover:bg-muted/50'
+                  }`}
+                >
+                  Sin limite
+                </button>
+                {[1, 2, 3].map((n) => (
+                  <button
+                    key={n}
+                    type="button"
+                    onClick={() => setInvitesPerPlayer(n)}
+                    className={`py-2 px-3 rounded-lg border-2 font-medium transition-all ${
+                      invitesPerPlayer === n
+                        ? 'border-primary bg-primary/10 text-primary'
+                        : 'border-border hover:border-primary/50 hover:bg-muted/50'
+                    }`}
+                  >
+                    {n}
+                  </button>
+                ))}
+              </div>
+              <p className="text-xs text-muted-foreground">
+                {invitesPerPlayer === null 
+                  ? 'Cada jugador puede invitar sin restricciones' 
+                  : `Cada jugador puede invitar hasta ${invitesPerPlayer} persona(s)`}
+              </p>
             </div>
 
             {/* Visibility toggle */}
