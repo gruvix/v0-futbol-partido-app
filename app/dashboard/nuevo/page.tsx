@@ -1,7 +1,7 @@
 'use client'
 
 import React from "react"
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
@@ -9,7 +9,8 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
 import { Input } from '@/components/ui/input'
 import { createMatch } from '@/app/actions/matches'
-import { ArrowLeft, Calendar, Clock, MapPin, Globe, Lock, Users, Pencil } from 'lucide-react'
+import { getCurrentUser } from '@/app/actions/auth'
+import { ArrowLeft, Calendar, Clock, MapPin, Globe, Lock, Users, Pencil, ChevronLeft, ChevronRight } from 'lucide-react'
 import { Switch } from '@/components/ui/switch'
 import Link from 'next/link'
 import { useActionLoader } from '@/components/football-loader'
@@ -45,19 +46,38 @@ export default function NuevoPartidoPage() {
   const [teamSize, setTeamSize] = useState(5)
   const [customTeamSize, setCustomTeamSize] = useState('')
   const [useCustomTeamSize, setUseCustomTeamSize] = useState(false)
+  const [userName, setUserName] = useState('')
+  const [weekOffset, setWeekOffset] = useState(0) // 0 = this week, 1 = next week, etc.
   const router = useRouter()
   const { showLoader, hideLoader } = useActionLoader()
 
-  // Generate next 7 days
+  // Fetch current user's name for placeholder
+  useEffect(() => {
+    getCurrentUser().then((user) => {
+      if (user?.name) {
+        setUserName(user.name)
+      }
+    })
+  }, [])
+
+  // Generate 7 days starting from weekOffset * 7 days from tomorrow
   const dates = Array.from({ length: 7 }, (_, i) => {
     const date = new Date()
-    date.setDate(date.getDate() + i + 1)
+    date.setDate(date.getDate() + 1 + (weekOffset * 7) + i)
     return date
   })
   
-  const [selectedDate, setSelectedDate] = useState(dates[0].toISOString().split('T')[0])
+  const [selectedDate, setSelectedDate] = useState(() => {
+    const tomorrow = new Date()
+    tomorrow.setDate(tomorrow.getDate() + 1)
+    return tomorrow.toISOString().split('T')[0]
+  })
   
   const dayNames = ['Dom', 'Lun', 'Mar', 'Mie', 'Jue', 'Vie', 'Sab']
+  
+  // Max 4 weeks ahead (approximately 1 month)
+  const canGoForward = weekOffset < 4
+  const canGoBack = weekOffset > 0
 
   // Calculate actual team count
   const actualTeamCount = useCustomTeamCount && customTeamCount ? parseInt(customTeamCount) : teamCount
@@ -124,7 +144,7 @@ export default function NuevoPartidoPage() {
               <Input
                 value={title}
                 onChange={(e) => setTitle(e.target.value)}
-                placeholder="Partido de fulano (por defecto)"
+                placeholder={userName ? `Partido de ${userName}` : 'Cargando...'}
                 maxLength={100}
               />
             </div>
@@ -135,26 +155,54 @@ export default function NuevoPartidoPage() {
                 <Calendar className="w-4 h-4 text-primary" />
                 Fecha
               </Label>
-              <div className="grid grid-cols-4 sm:grid-cols-7 gap-2">
-                {dates.map((date) => {
-                  const dateStr = date.toISOString().split('T')[0]
-                  const isSelected = selectedDate === dateStr
-                  return (
-                    <button
-                      key={dateStr}
-                      type="button"
-                      onClick={() => setSelectedDate(dateStr)}
-                      className={`flex flex-col items-center p-2 rounded-lg border-2 transition-all ${
-                        isSelected
-                          ? 'border-primary bg-primary/10 text-primary'
-                          : 'border-border hover:border-primary/50 hover:bg-muted/50'
-                      }`}
-                    >
-                      <span className="text-xs font-medium">{dayNames[date.getDay()]}</span>
-                      <span className="text-lg font-bold">{date.getDate()}</span>
-                    </button>
-                  )
-                })}
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setWeekOffset(prev => prev - 1)}
+                  disabled={!canGoBack}
+                  className={`p-2 rounded-lg border-2 transition-all ${
+                    canGoBack 
+                      ? 'border-border hover:border-primary/50 hover:bg-muted/50' 
+                      : 'border-border/50 text-muted-foreground/50 cursor-not-allowed'
+                  }`}
+                  aria-label="Semana anterior"
+                >
+                  <ChevronLeft className="w-5 h-5" />
+                </button>
+                <div className="flex-1 grid grid-cols-7 gap-1">
+                  {dates.map((date) => {
+                    const dateStr = date.toISOString().split('T')[0]
+                    const isSelected = selectedDate === dateStr
+                    return (
+                      <button
+                        key={dateStr}
+                        type="button"
+                        onClick={() => setSelectedDate(dateStr)}
+                        className={`flex flex-col items-center p-2 rounded-lg border-2 transition-all ${
+                          isSelected
+                            ? 'border-primary bg-primary/10 text-primary'
+                            : 'border-border hover:border-primary/50 hover:bg-muted/50'
+                        }`}
+                      >
+                        <span className="text-xs font-medium">{dayNames[date.getDay()]}</span>
+                        <span className="text-lg font-bold">{date.getDate()}</span>
+                      </button>
+                    )
+                  })}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setWeekOffset(prev => prev + 1)}
+                  disabled={!canGoForward}
+                  className={`p-2 rounded-lg border-2 transition-all ${
+                    canGoForward 
+                      ? 'border-border hover:border-primary/50 hover:bg-muted/50' 
+                      : 'border-border/50 text-muted-foreground/50 cursor-not-allowed'
+                  }`}
+                  aria-label="Semana siguiente"
+                >
+                  <ChevronRight className="w-5 h-5" />
+                </button>
               </div>
             </div>
 
