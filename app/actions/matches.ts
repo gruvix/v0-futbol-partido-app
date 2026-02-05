@@ -16,9 +16,14 @@ export async function createMatch(formData: FormData) {
   const locationCustom = formData.get('locationCustom') as string
   const field = formData.get('field') as string
   const isPublic = formData.get('isPublic') !== 'false' // default to true
-  const title = formData.get('title') as string || null
+  const titleInput = formData.get('title') as string
   const teamCount = parseInt(formData.get('teamCount') as string) || 0
   const teamSize = parseInt(formData.get('teamSize') as string) || 5
+
+  // Get creator's name for default title
+  const user = await sql`SELECT name FROM users WHERE id = ${session.userId}`
+  const creatorName = user[0]?.name || 'Usuario'
+  const title = titleInput?.trim() ? titleInput : `Partido de ${creatorName}`
 
   if (!dateStr || !time || !locationType) {
     return { error: 'Todos los campos son requeridos' }

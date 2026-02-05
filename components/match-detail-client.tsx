@@ -4,7 +4,7 @@ import { useState, useCallback } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Card, CardContent, CardHeader } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -101,12 +101,6 @@ const locationLabels: Record<string, string> = {
   OTRO: 'Otro',
 }
 
-const roleLabels: Record<string, string> = {
-  PLAYER: 'Jugador',
-  SUBSTITUTE: 'Suplente',
-  EXTRA: 'Por las dudas',
-}
-
 const COMMON_TIMES = [
   '16:00', '17:00', '18:00', '19:00', '20:00', '21:00', '22:00', '23:00'
 ]
@@ -183,6 +177,9 @@ export function MatchDetailClient({
     ? match.location_custom
     : locationLabels[match.location_type] || match.location_type
 
+  // Display title - fallback to "Partido de [creator]"
+  const displayTitle = match.title || `Partido de ${match.creator_name}`
+
   const players = participants.filter(p => p.role === 'PLAYER')
   const substitutes = participants.filter(p => p.role === 'SUBSTITUTE')
   const extras = participants.filter(p => p.role === 'EXTRA')
@@ -221,8 +218,8 @@ export function MatchDetailClient({
   async function handleJoin(role: 'PLAYER' | 'SUBSTITUTE' | 'EXTRA') {
     setLoading(`join-${role}`)
     setError('')
-    const roleLabel = roleLabels[role]
-    showLoader(`Anotandote como ${roleLabel}...`)
+    const roleLabels: Record<string, string> = { PLAYER: 'Jugador', SUBSTITUTE: 'Suplente', EXTRA: 'Por las dudas' }
+    showLoader(`Anotandote como ${roleLabels[role]}...`)
     const result = await joinMatch(match.id, role)
     hideLoader()
     if (result?.error) {
@@ -327,18 +324,13 @@ export function MatchDetailClient({
 
       <Card>
         <CardHeader className="pb-4">
-          <div className="flex items-start justify-between">
-            <div className="flex-1">
-              {/* Title - Editable */}
+          <div className="flex items-start justify-between gap-4">
+            <div className="flex-1 flex flex-col gap-3">
+              {/* Title */}
               <EditableField
-                label="Titulo"
-                icon={<Pencil className="w-4 h-4" />}
+                icon={<Pencil className="w-4 h-4 text-primary" />}
                 displayValue={
-                  match.title ? (
-                    <CardTitle className="text-xl text-foreground">{match.title}</CardTitle>
-                  ) : (
-                    <span className="text-muted-foreground italic">Sin titulo</span>
-                  )
+                  <h1 className="text-xl font-bold text-foreground">{displayTitle}</h1>
                 }
                 canEdit={isAdmin && !isPast}
                 onSave={async () => {
@@ -349,94 +341,77 @@ export function MatchDetailClient({
                   <Input
                     value={editTitle}
                     onChange={(e) => setEditTitle(e.target.value)}
-                    placeholder="Titulo del partido"
+                    placeholder={`Partido de ${match.creator_name}`}
                     maxLength={100}
                   />
                 )}
               />
 
-              {/* Date - Editable */}
-              <div className="mt-3">
-                <EditableField
-                  label="Fecha"
-                  icon={<Calendar className="w-4 h-4" />}
-                  displayValue={<span className="text-foreground">{formattedDate}</span>}
-                  canEdit={isAdmin && !isPast}
-                  onSave={async () => {
-                    const time = editUseCustomTime ? `${editCustomHour}:${editCustomMinute}` : editSelectedTime
-                    const dateTime = new Date(`${editSelectedDate}T${time}:00.000Z`)
-                    const result = await updateMatchField(match.id, 'date_time', dateTime.toISOString())
-                    if (result?.error) return { error: result.error }
-                  }}
-                  renderEditor={() => (
-                    <div className="flex flex-col gap-2">
-                      <div className="flex items-center gap-2">
-                        <button
-                          type="button"
-                          onClick={() => setEditWeekOffset(prev => prev - 1)}
-                          disabled={!canEditGoBack}
-                          className={`p-2 rounded-lg border-2 transition-all ${
-                            canEditGoBack 
-                              ? 'border-border hover:border-primary/50 hover:bg-muted/50' 
-                              : 'border-border/50 text-muted-foreground/50 cursor-not-allowed'
-                          }`}
-                        >
-                          <ChevronLeft className="w-4 h-4" />
-                        </button>
-                        <div className="flex-1 grid grid-cols-7 gap-1">
-                          {editDates.map((d) => {
-                            const dateStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
-                            const isSelected = editSelectedDate === dateStr
-                            return (
-                              <button
-                                key={dateStr}
-                                type="button"
-                                onClick={() => setEditSelectedDate(dateStr)}
-                                className={`flex flex-col items-center p-1.5 rounded-lg border-2 transition-all ${
-                                  isSelected
-                                    ? 'border-primary bg-primary/10 text-primary'
-                                    : 'border-border hover:border-primary/50 hover:bg-muted/50'
-                                }`}
-                              >
-                                <span className="text-[10px] font-medium">{dayNamesShort[d.getDay()]}</span>
-                                <span className="text-sm font-bold">{d.getDate()}</span>
-                                <span className="text-[9px] text-muted-foreground">{monthNamesShort[d.getMonth()]}</span>
-                              </button>
-                            )
-                          })}
-                        </div>
-                        <button
-                          type="button"
-                          onClick={() => setEditWeekOffset(prev => prev + 1)}
-                          disabled={!canEditGoForward}
-                          className={`p-2 rounded-lg border-2 transition-all ${
-                            canEditGoForward 
-                              ? 'border-border hover:border-primary/50 hover:bg-muted/50' 
-                              : 'border-border/50 text-muted-foreground/50 cursor-not-allowed'
-                          }`}
-                        >
-                          <ChevronRight className="w-4 h-4" />
-                        </button>
+              {/* Date & Time combined */}
+              <EditableField
+                icon={<Calendar className="w-4 h-4 text-primary" />}
+                displayValue={
+                  <span className="text-foreground">{formattedDate} - {formattedTime} hs</span>
+                }
+                canEdit={isAdmin && !isPast}
+                onSave={async () => {
+                  const time = editUseCustomTime ? `${editCustomHour}:${editCustomMinute}` : editSelectedTime
+                  const dateTime = new Date(`${editSelectedDate}T${time}:00.000Z`)
+                  const result = await updateMatchField(match.id, 'date_time', dateTime.toISOString())
+                  if (result?.error) return { error: result.error }
+                }}
+                renderEditor={() => (
+                  <div className="flex flex-col gap-3">
+                    {/* Date picker */}
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setEditWeekOffset(prev => prev - 1)}
+                        disabled={!canEditGoBack}
+                        className={`p-2 rounded-lg border-2 transition-all ${
+                          canEditGoBack 
+                            ? 'border-border hover:border-primary/50 hover:bg-muted/50' 
+                            : 'border-border/50 text-muted-foreground/50 cursor-not-allowed'
+                        }`}
+                      >
+                        <ChevronLeft className="w-4 h-4" />
+                      </button>
+                      <div className="flex-1 grid grid-cols-7 gap-1">
+                        {editDates.map((d) => {
+                          const dateStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+                          const isSelected = editSelectedDate === dateStr
+                          return (
+                            <button
+                              key={dateStr}
+                              type="button"
+                              onClick={() => setEditSelectedDate(dateStr)}
+                              className={`flex flex-col items-center p-1.5 rounded-lg border-2 transition-all ${
+                                isSelected
+                                  ? 'border-primary bg-primary/10 text-primary'
+                                  : 'border-border hover:border-primary/50 hover:bg-muted/50'
+                              }`}
+                            >
+                              <span className="text-[10px] font-medium">{dayNamesShort[d.getDay()]}</span>
+                              <span className="text-sm font-bold">{d.getDate()}</span>
+                              <span className="text-[9px] text-muted-foreground">{monthNamesShort[d.getMonth()]}</span>
+                            </button>
+                          )
+                        })}
                       </div>
+                      <button
+                        type="button"
+                        onClick={() => setEditWeekOffset(prev => prev + 1)}
+                        disabled={!canEditGoForward}
+                        className={`p-2 rounded-lg border-2 transition-all ${
+                          canEditGoForward 
+                            ? 'border-border hover:border-primary/50 hover:bg-muted/50' 
+                            : 'border-border/50 text-muted-foreground/50 cursor-not-allowed'
+                        }`}
+                      >
+                        <ChevronRight className="w-4 h-4" />
+                      </button>
                     </div>
-                  )}
-                />
-              </div>
-
-              {/* Time - Editable */}
-              <div className="mt-3">
-                <EditableField
-                  label="Horario"
-                  icon={<Clock className="w-4 h-4" />}
-                  displayValue={<span className="text-foreground">{formattedTime} hs</span>}
-                  canEdit={isAdmin && !isPast}
-                  onSave={async () => {
-                    const time = editUseCustomTime ? `${editCustomHour}:${editCustomMinute}` : editSelectedTime
-                    const dateTime = new Date(`${editSelectedDate}T${time}:00.000Z`)
-                    const result = await updateMatchField(match.id, 'date_time', dateTime.toISOString())
-                    if (result?.error) return { error: result.error }
-                  }}
-                  renderEditor={() => (
+                    {/* Time picker */}
                     <div className="flex flex-col gap-2">
                       <div className="grid grid-cols-4 gap-1">
                         {COMMON_TIMES.map((time) => {
@@ -495,25 +470,30 @@ export function MatchDetailClient({
                         </div>
                       )}
                     </div>
-                  )}
-                />
-              </div>
+                  </div>
+                )}
+              />
 
-              {/* Location - Editable */}
-              <div className="mt-3">
-                <EditableField
-                  label="Ubicacion"
-                  icon={<MapPin className="w-4 h-4" />}
-                  displayValue={<span className="text-foreground">{location}</span>}
-                  canEdit={isAdmin && !isPast}
-                  onSave={async () => {
-                    await updateMatchField(match.id, 'location_type', editLocationType)
-                    if (editLocationType === 'OTRO') {
-                      await updateMatchField(match.id, 'location_custom', editLocationCustom)
-                    }
-                  }}
-                  renderEditor={() => (
+              {/* Location & Field combined */}
+              <EditableField
+                icon={<MapPin className="w-4 h-4 text-primary" />}
+                displayValue={
+                  <span className="text-foreground">
+                    {location}{match.field ? ` - ${match.field}` : ''}
+                  </span>
+                }
+                canEdit={isAdmin && !isPast}
+                onSave={async () => {
+                  await updateMatchField(match.id, 'location_type', editLocationType)
+                  if (editLocationType === 'OTRO') {
+                    await updateMatchField(match.id, 'location_custom', editLocationCustom)
+                  }
+                  await updateMatchField(match.id, 'field', editField || null)
+                }}
+                renderEditor={() => (
+                  <div className="flex flex-col gap-3">
                     <div className="flex flex-col gap-2">
+                      <span className="text-xs text-muted-foreground font-medium">Ubicacion</span>
                       <RadioGroup
                         value={editLocationType}
                         onValueChange={setEditLocationType}
@@ -538,39 +518,64 @@ export function MatchDetailClient({
                         />
                       )}
                     </div>
-                  )}
-                />
-              </div>
+                    <div className="flex flex-col gap-2">
+                      <span className="text-xs text-muted-foreground font-medium">Cancha (opcional)</span>
+                      <Input
+                        value={editField}
+                        onChange={(e) => setEditField(e.target.value)}
+                        placeholder="Ej: Cancha 1, Cancha B"
+                        maxLength={100}
+                      />
+                    </div>
+                  </div>
+                )}
+              />
 
-              {/* Field - Editable */}
-              <div className="mt-3">
-                <EditableField
-                  label="Cancha"
-                  icon={<MapPin className="w-4 h-4" />}
-                  displayValue={
-                    match.field ? (
-                      <span className="text-foreground">{match.field}</span>
-                    ) : (
-                      <span className="text-muted-foreground italic">No especificada</span>
-                    )
-                  }
-                  canEdit={isAdmin && !isPast}
-                  onSave={async () => {
-                    const result = await updateMatchField(match.id, 'field', editField || null)
-                    if (result?.error) return { error: result.error }
-                  }}
-                  renderEditor={() => (
-                    <Input
-                      value={editField}
-                      onChange={(e) => setEditField(e.target.value)}
-                      placeholder="Ej: Cancha 1, Cancha B"
-                      maxLength={100}
-                    />
-                  )}
-                />
-              </div>
+              {/* Visibility */}
+              <EditableField
+                icon={match.is_public ? <Globe className="w-4 h-4 text-primary" /> : <Lock className="w-4 h-4 text-primary" />}
+                displayValue={
+                  <span className="text-foreground">
+                    {match.is_public ? 'Publico' : 'Privado'}
+                  </span>
+                }
+                canEdit={isAdmin && !isPast}
+                onSave={async () => {
+                  const result = await updateMatchField(match.id, 'is_public', editIsPublic)
+                  if (result?.error) return { error: result.error }
+                }}
+                renderEditor={() => (
+                  <div
+                    role="button"
+                    tabIndex={0}
+                    onClick={() => setEditIsPublic(prev => !prev)}
+                    onKeyDown={(e) => e.key === 'Enter' && setEditIsPublic(prev => !prev)}
+                    className={`flex items-center justify-between p-3 rounded-lg border-2 transition-all text-left cursor-pointer ${
+                      editIsPublic ? 'border-primary bg-primary/10' : 'border-border hover:border-muted-foreground/50'
+                    }`}
+                  >
+                    <div className="flex flex-col gap-0.5">
+                      <span className="font-medium text-sm">
+                        {editIsPublic ? 'Publico' : 'Privado'}
+                      </span>
+                      <span className="text-xs text-muted-foreground">
+                        {editIsPublic 
+                          ? 'Visible para todos en el dashboard' 
+                          : 'Solo visible para jugadores invitados'}
+                      </span>
+                    </div>
+                    <div onClick={(e) => e.stopPropagation()}>
+                      <Switch
+                        checked={editIsPublic}
+                        onCheckedChange={setEditIsPublic}
+                        aria-label="Toggle visibility"
+                      />
+                    </div>
+                  </div>
+                )}
+              />
 
-              <p className="text-sm text-muted-foreground mt-3">
+              <p className="text-sm text-muted-foreground">
                 Organiza: {match.creator_name}
               </p>
             </div>
@@ -581,18 +586,17 @@ export function MatchDetailClient({
         </CardHeader>
 
         <CardContent className="flex flex-col gap-6">
-          {/* Team Configuration - Editable */}
-          <div className="flex flex-col gap-4 p-4 rounded-lg border border-border bg-muted/30">
+          {/* Team Configuration - Compact */}
+          <div className="flex flex-wrap items-center gap-4 p-3 rounded-lg border border-border bg-muted/30">
             <EditableField
-              label="Equipos"
-              icon={<Users className="w-4 h-4" />}
+              icon={<Users className="w-4 h-4 text-primary" />}
               displayValue={
-                <span className="text-foreground">
+                <span className="text-foreground text-sm">
                   {match.team_count === 0 ? 'Sin equipos' : `${match.team_count} equipos`}
                 </span>
               }
               canEdit={isAdmin && !isPast}
-              warning={players.length > 0 ? 'Cambiar la configuracion de equipos movera a todos los jugadores a la lista de suplentes.' : undefined}
+              warning={players.length > 0 ? 'Cambiar movera jugadores a suplentes.' : undefined}
               onSave={async () => {
                 const newTeamCount = editUseCustomTeamCount && editCustomTeamCount 
                   ? parseInt(editCustomTeamCount) 
@@ -654,11 +658,10 @@ export function MatchDetailClient({
 
             {match.team_count > 0 && (
               <EditableField
-                label="Jugadores por equipo"
-                icon={<Users className="w-4 h-4" />}
-                displayValue={<span className="text-foreground">{match.team_size} jugadores</span>}
+                icon={<Users className="w-4 h-4 text-primary" />}
+                displayValue={<span className="text-foreground text-sm">{match.team_size} por equipo</span>}
                 canEdit={isAdmin && !isPast}
-                warning={players.length > 0 ? 'Cambiar el tamano de equipos movera a todos los jugadores a la lista de suplentes.' : undefined}
+                warning={players.length > 0 ? 'Cambiar movera jugadores a suplentes.' : undefined}
                 onSave={async () => {
                   const newTeamSize = editUseCustomTeamSize && editCustomTeamSize 
                     ? parseInt(editCustomTeamSize) 
@@ -718,132 +721,50 @@ export function MatchDetailClient({
                 )}
               />
             )}
-
-            {/* Visibility - Editable */}
-            <EditableField
-              label="Visibilidad"
-              icon={match.is_public ? <Globe className="w-4 h-4" /> : <Lock className="w-4 h-4" />}
-              displayValue={
-                <span className="text-foreground">
-                  {match.is_public ? 'Publico' : 'Privado'}
-                </span>
-              }
-              canEdit={isAdmin && !isPast}
-              onSave={async () => {
-                const result = await updateMatchField(match.id, 'is_public', editIsPublic)
-                if (result?.error) return { error: result.error }
-              }}
-              renderEditor={() => (
-                <div
-                  role="button"
-                  tabIndex={0}
-                  onClick={() => setEditIsPublic(prev => !prev)}
-                  onKeyDown={(e) => e.key === 'Enter' && setEditIsPublic(prev => !prev)}
-                  className={`flex items-center justify-between p-3 rounded-lg border-2 transition-all text-left cursor-pointer ${
-                    editIsPublic ? 'border-primary bg-primary/10' : 'border-border hover:border-muted-foreground/50'
-                  }`}
-                >
-                  <div className="flex flex-col gap-0.5">
-                    <span className="font-medium text-sm">
-                      {editIsPublic ? 'Publico' : 'Privado'}
-                    </span>
-                    <span className="text-xs text-muted-foreground">
-                      {editIsPublic 
-                        ? 'Visible para todos en el dashboard' 
-                        : 'Solo visible para jugadores invitados'}
-                    </span>
-                  </div>
-                  <div onClick={(e) => e.stopPropagation()}>
-                    <Switch
-                      checked={editIsPublic}
-                      onCheckedChange={setEditIsPublic}
-                      aria-label="Toggle visibility"
-                    />
-                  </div>
-                </div>
-              )}
-            />
           </div>
 
-          {/* Join/Leave buttons */}
-          {!isPast && (
+          {/* Join buttons (only when not in match) */}
+          {!isPast && !userParticipation && (
             <div className="flex flex-col gap-2">
               {error && (
                 <p className="text-sm text-destructive">{error}</p>
               )}
-              
-              {userParticipation ? (
-                <div className="flex items-center gap-2 flex-wrap">
-                  <Badge variant="outline" className="text-sm">
-                    {roleLabels[userParticipation.role]}
-                  </Badge>
-                  <Button
-                    variant="destructive"
-                    size="sm"
-                    onClick={handleLeaveClick}
-                    disabled={isLoading}
-                    className="gap-2"
-                  >
-                    {loading === 'leave' ? (
-                      <FootballLoader size="sm" />
-                    ) : (
-                      <UserMinus className="w-4 h-4" />
-                    )}
-                    Abandonar
-                  </Button>
-                  {userParticipation.role !== 'PLAYER' && (
-                    <Button
-                      variant="secondary"
-                      size="sm"
-                      onClick={() => handleJoin('PLAYER')}
-                      disabled={isLoading}
-                    >
-                      {loading === 'join-PLAYER' ? (
-                        <FootballLoader size="sm" />
-                      ) : (
-                        'Cambiar a Jugador'
-                      )}
-                    </Button>
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  onClick={() => handleJoin('PLAYER')}
+                  disabled={isLoading}
+                  className="gap-2"
+                >
+                  {loading === 'join-PLAYER' ? (
+                    <FootballLoader size="sm" />
+                  ) : (
+                    <UserPlus className="w-4 h-4" />
                   )}
-                </div>
-              ) : (
-                <div className="flex flex-wrap gap-2">
-                  <Button
-                    onClick={() => handleJoin('PLAYER')}
-                    disabled={isLoading}
-                    className="gap-2"
-                  >
-                    {loading === 'join-PLAYER' ? (
-                      <FootballLoader size="sm" />
-                    ) : (
-                      <UserPlus className="w-4 h-4" />
-                    )}
-                    Anotarme
-                  </Button>
-                  <Button
-                    variant="secondary"
-                    onClick={() => handleJoin('SUBSTITUTE')}
-                    disabled={isLoading}
-                  >
-                    {loading === 'join-SUBSTITUTE' ? (
-                      <FootballLoader size="sm" />
-                    ) : (
-                      'Como suplente'
-                    )}
-                  </Button>
-                  <Button
-                    variant="outline"
-                    onClick={() => handleJoin('EXTRA')}
-                    disabled={isLoading}
-                  >
-                    {loading === 'join-EXTRA' ? (
-                      <FootballLoader size="sm" />
-                    ) : (
-                      'Por las dudas'
-                    )}
-                  </Button>
-                </div>
-              )}
+                  Anotarme
+                </Button>
+                <Button
+                  variant="secondary"
+                  onClick={() => handleJoin('SUBSTITUTE')}
+                  disabled={isLoading}
+                >
+                  {loading === 'join-SUBSTITUTE' ? (
+                    <FootballLoader size="sm" />
+                  ) : (
+                    'Como suplente'
+                  )}
+                </Button>
+                <Button
+                  variant="outline"
+                  onClick={() => handleJoin('EXTRA')}
+                  disabled={isLoading}
+                >
+                  {loading === 'join-EXTRA' ? (
+                    <FootballLoader size="sm" />
+                  ) : (
+                    'Por las dudas'
+                  )}
+                </Button>
+              </div>
             </div>
           )}
 
@@ -970,48 +891,78 @@ export function MatchDetailClient({
               <div className="flex flex-col gap-2">
                 <h4 className="text-sm font-medium text-muted-foreground">Por las dudas</h4>
                 <div className="flex flex-wrap gap-2">
-                  {extras.map((p) => (
-                    <Badge key={p.id} variant="outline" className="py-1.5 px-3">
-                      {p.name} ({p.phone_last_four})
-                    </Badge>
-                  ))}
+                  {extras.map((p) => {
+                    const isParticipantAdmin = admins.some(a => a.user_id === p.user_id)
+                    return (
+                      <div key={p.id} className="flex items-center gap-1">
+                        <Badge variant="outline" className="py-1.5 px-3">
+                          {p.name} ({p.phone_last_four})
+                          {isParticipantAdmin && <Shield className="w-3 h-3 ml-1" />}
+                        </Badge>
+                        {isAdmin && !isPast && p.user_id !== match.created_by_user_id && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-6 w-6 p-0"
+                            onClick={() => handleToggleAdmin(p.user_id, isParticipantAdmin)}
+                            title={isParticipantAdmin ? 'Quitar admin' : 'Hacer admin'}
+                          >
+                            <Shield className={`w-3 h-3 ${isParticipantAdmin ? 'text-primary' : 'text-muted-foreground'}`} />
+                          </Button>
+                        )}
+                      </div>
+                    )
+                  })}
                 </div>
               </div>
             )}
-
-            {participants.length === 0 && (
-              <p className="text-muted-foreground text-sm">Todavia no hay nadie anotado</p>
-            )}
           </div>
 
-          {/* Delete button for creator */}
-          {isCreator && !isPast && (
-            <div className="pt-4 border-t border-border">
-              <Button
-                variant="destructive"
-                size="sm"
-                onClick={() => setShowDeleteConfirm(true)}
-                disabled={isLoading}
-                className="gap-2"
-              >
-                {loading === 'delete' ? (
-                  <FootballLoader size="sm" />
-                ) : (
-                  <Trash2 className="w-4 h-4" />
+          {/* Bottom actions - leave button moved here */}
+          {!isPast && (
+            <div className="flex items-center justify-between flex-wrap gap-2 pt-4 border-t border-border">
+              <div>
+                {error && <p className="text-sm text-destructive">{error}</p>}
+              </div>
+              <div className="flex items-center gap-2 ml-auto">
+                {isCreator && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setShowDeleteConfirm(true)}
+                    disabled={isLoading}
+                    className="gap-2 text-destructive hover:text-destructive hover:bg-destructive/10"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                    Eliminar
+                  </Button>
                 )}
-                Eliminar partido
-              </Button>
+                {userParticipation && (
+                  <Button
+                    variant="destructive"
+                    size="sm"
+                    onClick={handleLeaveClick}
+                    disabled={isLoading}
+                    className="gap-2"
+                  >
+                    {loading === 'leave' ? (
+                      <FootballLoader size="sm" />
+                    ) : (
+                      <UserMinus className="w-4 h-4" />
+                    )}
+                    Abandonar
+                  </Button>
+                )}
+              </div>
             </div>
           )}
         </CardContent>
       </Card>
 
-      {/* Invite Dialog */}
       <InvitePlayersDialog
         open={showInviteDialog}
         onOpenChange={setShowInviteDialog}
         matchId={match.id}
-        currentParticipantIds={participants.map(p => p.user_id)}
       />
 
       {/* Delete Confirmation Dialog */}
@@ -1020,7 +971,7 @@ export function MatchDetailClient({
           <AlertDialogHeader>
             <AlertDialogTitle>Eliminar partido</AlertDialogTitle>
             <AlertDialogDescription>
-              Seguro que queres eliminar este partido? Esta accion no se puede deshacer.
+              Estas seguro que queres eliminar este partido? Esta accion no se puede deshacer.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -1069,18 +1020,18 @@ export function MatchDetailClient({
       </AlertDialog>
 
       {/* Team Reset Warning Dialog */}
-      <AlertDialog open={showTeamResetWarning !== null} onOpenChange={(open) => !open && setShowTeamResetWarning(null)}>
+      <AlertDialog open={showTeamResetWarning !== null} onOpenChange={() => setShowTeamResetWarning(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>Cambiar configuracion de equipos</AlertDialogTitle>
             <AlertDialogDescription>
-              Al cambiar la configuracion de equipos, todos los jugadores actuales seran movidos a la lista de suplentes. Queres continuar?
+              Cambiar la configuracion de equipos movera a todos los jugadores a la lista de suplentes. Queres continuar?
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancelar</AlertDialogCancel>
             <AlertDialogAction onClick={confirmTeamReset}>
-              Confirmar cambio
+              Continuar
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

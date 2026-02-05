@@ -6,8 +6,6 @@ import { Settings, X, Check } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
 interface EditableFieldProps {
-  /** The field label */
-  label: string
   /** Current display value when not editing */
   displayValue: ReactNode
   /** Whether user can edit this field */
@@ -20,12 +18,13 @@ interface EditableFieldProps {
   warning?: string
   /** Optional className for the container */
   className?: string
-  /** Icon to show before the label */
+  /** Icon to show before the display value */
   icon?: ReactNode
+  /** Optional label for screen readers */
+  label?: string
 }
 
 export function EditableField({
-  label,
   displayValue,
   canEdit,
   onSave,
@@ -33,6 +32,7 @@ export function EditableField({
   warning,
   className,
   icon,
+  label,
 }: EditableFieldProps) {
   const [isEditing, setIsEditing] = useState(false)
   const [isSaving, setIsSaving] = useState(false)
@@ -66,54 +66,9 @@ export function EditableField({
     }
   }, [onSave])
 
-  return (
-    <div className={cn('flex flex-col gap-2', className)}>
-      <div className="flex items-center justify-between gap-2">
-        <div className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
-          {icon}
-          {label}
-        </div>
-        {canEdit && (
-          <div className="flex items-center gap-1">
-            {isEditing ? (
-              <>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={handleCancel}
-                  disabled={isSaving}
-                  className="h-7 w-7 p-0 text-muted-foreground hover:text-destructive"
-                >
-                  <X className="w-4 h-4" />
-                  <span className="sr-only">Cancelar</span>
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={handleSave}
-                  disabled={isSaving}
-                  className="h-7 w-7 p-0 text-muted-foreground hover:text-primary"
-                >
-                  <Check className="w-4 h-4" />
-                  <span className="sr-only">Confirmar</span>
-                </Button>
-              </>
-            ) : (
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={handleStartEdit}
-                className="h-7 w-7 p-0 text-muted-foreground hover:text-primary"
-              >
-                <Settings className="w-4 h-4" />
-                <span className="sr-only">Editar {label}</span>
-              </Button>
-            )}
-          </div>
-        )}
-      </div>
-      
-      {isEditing ? (
+  if (isEditing) {
+    return (
+      <div className={cn('flex flex-col gap-2', className)}>
         <div className="flex flex-col gap-2">
           {renderEditor()}
           {warning && (
@@ -125,8 +80,46 @@ export function EditableField({
             <p className="text-xs text-destructive">{error}</p>
           )}
         </div>
-      ) : (
-        <div className="text-foreground">{displayValue}</div>
+        <div className="flex items-center gap-1">
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={handleCancel}
+            disabled={isSaving}
+            className="h-7 px-2 text-muted-foreground hover:text-destructive"
+          >
+            <X className="w-4 h-4 mr-1" />
+            Cancelar
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={handleSave}
+            disabled={isSaving}
+            className="h-7 px-2 text-muted-foreground hover:text-primary"
+          >
+            <Check className="w-4 h-4 mr-1" />
+            Confirmar
+          </Button>
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div className={cn('flex items-center gap-2', className)}>
+      {icon && <span className="flex-shrink-0">{icon}</span>}
+      <div className="flex-1">{displayValue}</div>
+      {canEdit && (
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={handleStartEdit}
+          className="h-6 w-6 p-0 text-muted-foreground hover:text-primary flex-shrink-0"
+        >
+          <Settings className="w-3.5 h-3.5" />
+          <span className="sr-only">Editar {label}</span>
+        </Button>
       )}
     </div>
   )
