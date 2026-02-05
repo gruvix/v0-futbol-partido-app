@@ -8,6 +8,7 @@ import { Plus, Calendar } from 'lucide-react'
 
 interface Match {
   id: number
+  title: string | null
   date_time: string
   location_type: string
   location_custom: string | null
@@ -21,6 +22,7 @@ async function getUpcomingMatches(): Promise<Match[]> {
   const matches = await sql`
     SELECT 
       m.id,
+      m.title,
       m.date_time,
       m.location_type,
       m.location_custom,
@@ -43,6 +45,7 @@ async function getPastMatches(): Promise<Match[]> {
   const matches = await sql`
     SELECT 
       m.id,
+      m.title,
       m.date_time,
       m.location_type,
       m.location_custom,

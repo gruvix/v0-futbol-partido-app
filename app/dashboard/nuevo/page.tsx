@@ -1,7 +1,7 @@
 'use client'
 
 import React from "react"
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
@@ -9,7 +9,8 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
 import { Input } from '@/components/ui/input'
 import { createMatch } from '@/app/actions/matches'
-import { ArrowLeft, Calendar, Clock, MapPin, Globe, Lock, Users, Pencil } from 'lucide-react'
+import { getCurrentUser } from '@/app/actions/auth'
+import { ArrowLeft, Calendar, Clock, MapPin, Globe, Lock, Users, Pencil, ChevronLeft, ChevronRight } from 'lucide-react'
 import { Switch } from '@/components/ui/switch'
 import Link from 'next/link'
 import { useActionLoader } from '@/components/football-loader'
@@ -32,32 +33,56 @@ const PICKER_MINUTES = ['00', '15', '30', '45']
 export default function NuevoPartidoPage() {
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
+  const [title, setTitle] = useState('')
   const [locationType, setLocationType] = useState('TERRAZAS')
+  const [field, setField] = useState('')
   const [selectedTime, setSelectedTime] = useState('21:00')
   const [customHour, setCustomHour] = useState('21')
   const [customMinute, setCustomMinute] = useState('00')
   const [useCustomTime, setUseCustomTime] = useState(false)
   const [isPublic, setIsPublic] = useState(true)
-  const [title, setTitle] = useState('')
   const [teamCount, setTeamCount] = useState(0) // 0 = no teams, 2 = two teams
   const [customTeamCount, setCustomTeamCount] = useState('')
   const [useCustomTeamCount, setUseCustomTeamCount] = useState(false)
   const [teamSize, setTeamSize] = useState(5)
   const [customTeamSize, setCustomTeamSize] = useState('')
   const [useCustomTeamSize, setUseCustomTeamSize] = useState(false)
+  const [userName, setUserName] = useState('')
+  const [weekOffset, setWeekOffset] = useState(0) // 0 = this week, 1 = next week, etc.
   const router = useRouter()
   const { showLoader, hideLoader } = useActionLoader()
 
-  // Generate next 7 days
+  // Fetch current user's name for placeholder
+  useEffect(() => {
+    getCurrentUser().then((user) => {
+      if (user?.name) {
+        setUserName(user.name)
+      }
+    })
+  }, [])
+
+  // Generate 7 days starting from weekOffset * 7 days from tomorrow
   const dates = Array.from({ length: 7 }, (_, i) => {
     const date = new Date()
-    date.setDate(date.getDate() + i + 1)
+    date.setDate(date.getDate() + 1 + (weekOffset * 7) + i)
     return date
   })
   
-  const [selectedDate, setSelectedDate] = useState(dates[0].toISOString().split('T')[0])
+  const [selectedDate, setSelectedDate] = useState(() => {
+    const tomorrow = new Date()
+    tomorrow.setDate(tomorrow.getDate() + 1)
+    return tomorrow.toISOString().split('T')[0]
+  })
   
   const dayNames = ['Dom', 'Lun', 'Mar', 'Mie', 'Jue', 'Vie', 'Sab']
+  const monthNames = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic']
+  
+  // Max 4 weeks ahead (approximately 1 month)
+  const canGoForward = weekOffset < 4
+  const canGoBack = weekOffset > 0
+
+  // Calculate actual team count
+  const actualTeamCount = useCustomTeamCount && customTeamCount ? parseInt(customTeamCount) : teamCount
 
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault()
@@ -68,10 +93,10 @@ export default function NuevoPartidoPage() {
     formData.set('date', selectedDate)
     formData.set('time', useCustomTime ? `${customHour}:${customMinute}` : selectedTime)
     formData.set('locationType', locationType)
+    formData.set('field', field)
     formData.set('isPublic', isPublic.toString())
     formData.set('title', title)
-    const finalTeamCount = useCustomTeamCount && customTeamCount ? parseInt(customTeamCount) : teamCount
-    formData.set('teamCount', finalTeamCount.toString())
+    formData.set('teamCount', actualTeamCount.toString())
     const finalTeamSize = useCustomTeamSize && customTeamSize ? parseInt(customTeamSize) : teamSize
     formData.set('teamSize', finalTeamSize.toString())
     
@@ -122,7 +147,7 @@ export default function NuevoPartidoPage() {
               <Input
                 value={title}
                 onChange={(e) => setTitle(e.target.value)}
-                placeholder="Partido de fulano (por defecto)"
+                placeholder={userName ? `Partido de ${userName}` : 'Cargando...'}
                 maxLength={100}
               />
             </div>
@@ -133,26 +158,55 @@ export default function NuevoPartidoPage() {
                 <Calendar className="w-4 h-4 text-primary" />
                 Fecha
               </Label>
-              <div className="grid grid-cols-4 sm:grid-cols-7 gap-2">
-                {dates.map((date) => {
-                  const dateStr = date.toISOString().split('T')[0]
-                  const isSelected = selectedDate === dateStr
-                  return (
-                    <button
-                      key={dateStr}
-                      type="button"
-                      onClick={() => setSelectedDate(dateStr)}
-                      className={`flex flex-col items-center p-2 rounded-lg border-2 transition-all ${
-                        isSelected
-                          ? 'border-primary bg-primary/10 text-primary'
-                          : 'border-border hover:border-primary/50 hover:bg-muted/50'
-                      }`}
-                    >
-                      <span className="text-xs font-medium">{dayNames[date.getDay()]}</span>
-                      <span className="text-lg font-bold">{date.getDate()}</span>
-                    </button>
-                  )
-                })}
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setWeekOffset(prev => prev - 1)}
+                  disabled={!canGoBack}
+                  className={`p-2 rounded-lg border-2 transition-all ${
+                    canGoBack 
+                      ? 'border-border hover:border-primary/50 hover:bg-muted/50' 
+                      : 'border-border/50 text-muted-foreground/50 cursor-not-allowed'
+                  }`}
+                  aria-label="Semana anterior"
+                >
+                  <ChevronLeft className="w-5 h-5" />
+                </button>
+                <div className="flex-1 grid grid-cols-7 gap-1">
+                  {dates.map((date) => {
+                    const dateStr = date.toISOString().split('T')[0]
+                    const isSelected = selectedDate === dateStr
+                    return (
+                      <button
+                        key={dateStr}
+                        type="button"
+                        onClick={() => setSelectedDate(dateStr)}
+                        className={`flex flex-col items-center p-2 rounded-lg border-2 transition-all ${
+                          isSelected
+                            ? 'border-primary bg-primary/10 text-primary'
+                            : 'border-border hover:border-primary/50 hover:bg-muted/50'
+                        }`}
+                      >
+                        <span className="text-xs font-medium">{dayNames[date.getDay()]}</span>
+                        <span className="text-lg font-bold">{date.getDate()}</span>
+                        <span className="text-[10px] text-muted-foreground">{monthNames[date.getMonth()]}</span>
+                      </button>
+                    )
+                  })}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setWeekOffset(prev => prev + 1)}
+                  disabled={!canGoForward}
+                  className={`p-2 rounded-lg border-2 transition-all ${
+                    canGoForward 
+                      ? 'border-border hover:border-primary/50 hover:bg-muted/50' 
+                      : 'border-border/50 text-muted-foreground/50 cursor-not-allowed'
+                  }`}
+                  aria-label="Semana siguiente"
+                >
+                  <ChevronRight className="w-5 h-5" />
+                </button>
               </div>
             </div>
 
@@ -224,7 +278,7 @@ export default function NuevoPartidoPage() {
             <div className="flex flex-col gap-3">
               <Label className="flex items-center gap-2">
                 <MapPin className="w-4 h-4 text-primary" />
-                Cancha
+                Ubicacion
               </Label>
               <RadioGroup
                 value={locationType}
@@ -252,7 +306,7 @@ export default function NuevoPartidoPage() {
                 }`}>
                   <RadioGroupItem value="OTRO" id="otro" />
                   <Label htmlFor="otro" className="cursor-pointer flex-1 font-normal">
-                    Otra cancha
+                    Otra ubicacion
                   </Label>
                 </div>
               </RadioGroup>
@@ -260,7 +314,7 @@ export default function NuevoPartidoPage() {
 
             {locationType === 'OTRO' && (
               <div className="flex flex-col gap-2">
-                <Label htmlFor="locationCustom">Nombre de la cancha</Label>
+                <Label htmlFor="locationCustom">Nombre de la ubicacion</Label>
                 <Input
                   id="locationCustom"
                   name="locationCustom"
@@ -270,6 +324,20 @@ export default function NuevoPartidoPage() {
                 />
               </div>
             )}
+
+            {/* Field selection */}
+            <div className="flex flex-col gap-3">
+              <Label className="flex items-center gap-2">
+                <MapPin className="w-4 h-4 text-primary" />
+                Cancha (opcional)
+              </Label>
+              <Input
+                value={field}
+                onChange={(e) => setField(e.target.value)}
+                placeholder="Ej: Cancha 1, Cancha B"
+                maxLength={100}
+              />
+            </div>
 
             {/* Team configuration */}
             <div className="flex flex-col gap-3">
@@ -304,7 +372,7 @@ export default function NuevoPartidoPage() {
                       : 'border-border hover:border-primary/50 hover:bg-muted/50'
                   }`}
                 >
-                  2 equipos
+                  2 Equipos
                 </button>
                 <button
                   type="button"
@@ -323,14 +391,15 @@ export default function NuevoPartidoPage() {
                 <Input
                   type="number"
                   min="2"
-                  max="20"
+                  max="10"
                   value={customTeamCount}
                   onChange={(e) => setCustomTeamCount(e.target.value)}
                   placeholder="Cantidad de equipos"
+                  className="mt-1"
                 />
               )}
               
-              {(teamCount > 0 || useCustomTeamCount) && (
+              {actualTeamCount > 0 && (
                 <div className="flex flex-col gap-2 p-3 rounded-lg border border-border bg-muted/30">
                   <Label className="text-sm text-muted-foreground">Jugadores por equipo</Label>
                   <div className="grid grid-cols-3 gap-2">
@@ -382,7 +451,7 @@ export default function NuevoPartidoPage() {
                       value={customTeamSize}
                       onChange={(e) => setCustomTeamSize(e.target.value)}
                       placeholder="Cantidad de jugadores"
-                      className="mt-2"
+                      className="mt-1"
                     />
                   )}
                 </div>
@@ -398,13 +467,8 @@ export default function NuevoPartidoPage() {
               <div
                 role="button"
                 tabIndex={0}
-                onClick={() => setIsPublic(!isPublic)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' || e.key === ' ') {
-                    e.preventDefault()
-                    setIsPublic(!isPublic)
-                  }
-                }}
+                onClick={() => setIsPublic(prev => !prev)}
+                onKeyDown={(e) => e.key === 'Enter' && setIsPublic(prev => !prev)}
                 className={`flex items-center justify-between p-3 rounded-lg border-2 transition-all text-left cursor-pointer ${
                   isPublic ? 'border-primary bg-primary/10' : 'border-border hover:border-muted-foreground/50'
                 }`}
@@ -419,11 +483,13 @@ export default function NuevoPartidoPage() {
                       : 'Solo visible para jugadores invitados'}
                   </span>
                 </div>
-                <Switch
-                  checked={isPublic}
-                  onCheckedChange={setIsPublic}
-                  aria-label="Toggle visibility"
-                />
+                <div onClick={(e) => e.stopPropagation()}>
+                  <Switch
+                    checked={isPublic}
+                    onCheckedChange={setIsPublic}
+                    aria-label="Toggle visibility"
+                  />
+                </div>
               </div>
             </div>
 

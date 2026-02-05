@@ -6,13 +6,13 @@ import { cn } from '@/lib/utils'
 
 interface Match {
   id: number
+  title: string | null
   date_time: string
   location_type: string
   location_custom: string | null
   created_by_user_id: number
   creator_name: string
   participant_count: number
-  title: string | null
 }
 
 interface MatchCardProps {
@@ -61,25 +61,26 @@ export function MatchCard({ match, currentUserId, isPast }: MatchCardProps) {
           </div>
 
           <div className="flex-1 min-w-0">
+            {match.title && (
+              <p className="font-semibold text-foreground truncate mb-0.5">{match.title}</p>
+            )}
             <div className="flex items-center gap-2 mb-1">
-              <span className="font-semibold text-foreground truncate">
-                {match.title || `Partido de ${match.creator_name}`}
-              </span>
+              <Clock className="w-4 h-4 text-muted-foreground" />
+              <span className={`${match.title ? 'text-sm' : 'font-semibold'} text-foreground`}>{time} hs</span>
               {isCreator && (
-                <Badge variant="secondary" className="text-xs shrink-0">Tu partido</Badge>
+                <Badge variant="secondary" className="text-xs">Tu partido</Badge>
               )}
             </div>
             
             <div className="flex items-center gap-2 text-sm text-muted-foreground">
-              <Clock className="w-4 h-4" />
-              <span>{time} hs</span>
-              <MapPin className="w-4 h-4 ml-2" />
+              <MapPin className="w-4 h-4" />
               <span className="truncate">{location}</span>
             </div>
 
             <div className="flex items-center gap-2 text-sm text-muted-foreground mt-1">
               <Users className="w-4 h-4" />
               <span>{match.participant_count} anotados</span>
+              <span className="text-xs">- Organiza {match.creator_name}</span>
             </div>
           </div>
 
