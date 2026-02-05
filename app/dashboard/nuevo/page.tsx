@@ -11,7 +11,7 @@ import { Input } from '@/components/ui/input'
 import { createMatch } from '@/app/actions/matches'
 import { ArrowLeft, Calendar, Clock, MapPin } from 'lucide-react'
 import Link from 'next/link'
-import { FootballLoader } from '@/components/football-loader'
+import { useActionLoader } from '@/components/football-loader'
 
 const COMMON_TIMES = [
   { label: '19:00', value: '19:00' },
@@ -32,6 +32,7 @@ export default function NuevoPartidoPage() {
   const [customTime, setCustomTime] = useState('')
   const [useCustomTime, setUseCustomTime] = useState(false)
   const router = useRouter()
+  const { showLoader, hideLoader } = useActionLoader()
 
   // Generate next 7 days
   const dates = Array.from({ length: 7 }, (_, i) => {
@@ -64,7 +65,9 @@ export default function NuevoPartidoPage() {
       formData.set('locationCustom', customLocation)
     }
     
+    showLoader('Creando partido...')
     const result = await createMatch(formData)
+    hideLoader()
 
     if (result?.error) {
       setError(result.error)
@@ -226,14 +229,7 @@ export default function NuevoPartidoPage() {
             )}
 
             <Button type="submit" className="w-full h-12 text-base" disabled={loading}>
-              {loading ? (
-                <span className="flex items-center gap-2">
-                  <FootballLoader size="sm" />
-                  Creando partido...
-                </span>
-              ) : (
-                'Crear partido'
-              )}
+              Crear partido
             </Button>
           </form>
         </CardContent>

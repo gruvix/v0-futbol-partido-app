@@ -9,7 +9,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { register } from '@/app/actions/auth'
-import { FootballLoader } from '@/components/football-loader'
+import { LoadingOverlay } from '@/components/football-loader'
 
 export default function RegistroPage() {
   const [error, setError] = useState('')
@@ -42,6 +42,7 @@ export default function RegistroPage() {
 
   return (
     <main className="min-h-screen flex items-center justify-center bg-background p-4">
+      {loading && !success && <LoadingOverlay message="Creando cuenta..." />}
       <Card className="w-full max-w-md">
         <CardHeader className="text-center">
           <CardTitle className="text-2xl font-bold text-foreground">Registrate</CardTitle>
@@ -100,12 +101,15 @@ export default function RegistroPage() {
                   id="password"
                   name="password"
                   type="password"
-                  placeholder="Minimo 4 caracteres"
+                  placeholder="Minimo 8 caracteres"
                   required
-                  minLength={4}
+                  minLength={8}
                   autoComplete="new-password"
                   disabled={loading}
                 />
+                <p className="text-xs text-muted-foreground">
+                  Debe tener al menos 8 caracteres
+                </p>
               </div>
 
               {error && (
@@ -113,14 +117,7 @@ export default function RegistroPage() {
               )}
 
               <Button type="submit" className="w-full" disabled={loading}>
-                {loading ? (
-                  <span className="flex items-center gap-2">
-                    <FootballLoader size="sm" />
-                    Creando cuenta...
-                  </span>
-                ) : (
-                  'Crear cuenta'
-                )}
+                Crear cuenta
               </Button>
 
               <p className="text-sm text-center text-muted-foreground">

@@ -21,7 +21,7 @@ import {
 import { joinMatch, leaveMatch, deleteMatch, randomizeTeams, assignTeam } from '@/app/actions/matches'
 import { TeamAssignment } from '@/components/team-assignment'
 import { InvitePlayersDialog } from '@/components/invite-players-dialog'
-import { FootballLoader } from '@/components/football-loader'
+import { FootballLoader, useActionLoader } from '@/components/football-loader'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -86,13 +86,19 @@ export function MatchDetailClient({
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
   const [showLastPlayerConfirm, setShowLastPlayerConfirm] = useState(false)
   const router = useRouter()
+  const { showLoader, hideLoader } = useActionLoader()
 
+  // Parse the date without timezone conversion to avoid hour offset issues
+  // The date_time comes from DB as ISO string, we extract the time directly
   const date = new Date(match.date_time)
   const dayNames = ['Domingo', 'Lunes', 'Martes', 'Miercoles', 'Jueves', 'Viernes', 'Sabado']
   const monthNames = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre']
   
-  const formattedDate = `${dayNames[date.getDay()]} ${date.getDate()} de ${monthNames[date.getMonth()]}`
-  const formattedTime = date.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' })
+  const formattedDate = `${dayNames[date.getUTCDay()]} ${date.getUTCDate()} de ${monthNames[date.getUTCMonth()]}`
+  // Use 24-hour format, extract from UTC to match what was stored
+  const hours = date.getUTCHours().toString().padStart(2, '0')
+  const minutes = date.getUTCMinutes().toString().padStart(2, '0')
+  const formattedTime = `${hours}:${minutes}`
   
   const location = match.location_type === 'OTRO' && match.location_custom
     ? match.location_custom
@@ -105,7 +111,10 @@ export function MatchDetailClient({
   async function handleJoin(role: 'PLAYER' | 'SUBSTITUTE' | 'EXTRA') {
     setLoading(`join-${role}`)
     setError('')
+    const roleLabel = roleLabels[role]
+    showLoader(`Anotandote como ${roleLabel}...`)
     const result = await joinMatch(match.id, role)
+    hideLoader()
     if (result?.error) {
       setError(result.error)
     }
@@ -115,7 +124,9 @@ export function MatchDetailClient({
   async function handleLeave() {
     setLoading('leave')
     setError('')
+    showLoader('Abandonando partido...')
     const result = await leaveMatch(match.id)
+    hideLoader()
     if (result?.error) {
       setError(result.error)
       setLoading(null)
@@ -129,7 +140,9 @@ export function MatchDetailClient({
 
   async function handleDelete() {
     setLoading('delete')
+    showLoader('Eliminando partido...')
     const result = await deleteMatch(match.id)
+    hideLoader()
     if (result?.error) {
       setError(result.error)
       setLoading(null)
@@ -141,7 +154,9 @@ export function MatchDetailClient({
   async function handleRandomize() {
     setLoading('randomize')
     setError('')
+    showLoader('Sorteando equipos...')
     const result = await randomizeTeams(match.id)
+    hideLoader()
     if (result?.error) {
       setError(result.error)
     }
@@ -204,18 +219,18 @@ export function MatchDetailClient({
                     {roleLabels[userParticipation.role]}
                   </Badge>
                   <Button
-                    variant="outline"
+                    variant="destructive"
                     size="sm"
                     onClick={handleLeave}
                     disabled={isLoading}
-                    className="gap-2 bg-transparent"
+                    className="gap-2"
                   >
                     {loading === 'leave' ? (
                       <FootballLoader size="sm" />
                     ) : (
                       <UserMinus className="w-4 h-4" />
                     )}
-                    Borrarme
+                    Abandonar
                   </Button>
                   {userParticipation.role !== 'PLAYER' && (
                     <Button
