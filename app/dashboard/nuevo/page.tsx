@@ -401,8 +401,8 @@ export default function NuevoPartidoPage() {
               <div
                 role="button"
                 tabIndex={0}
-                onClick={() => setIsPublic(!isPublic)}
-                onKeyDown={(e) => e.key === 'Enter' && setIsPublic(!isPublic)}
+                onClick={() => setIsPublic(prev => !prev)}
+                onKeyDown={(e) => e.key === 'Enter' && setIsPublic(prev => !prev)}
                 className={`flex items-center justify-between p-3 rounded-lg border-2 transition-all text-left cursor-pointer ${
                   isPublic ? 'border-primary bg-primary/10' : 'border-border hover:border-muted-foreground/50'
                 }`}
@@ -417,11 +417,13 @@ export default function NuevoPartidoPage() {
                       : 'Solo visible para jugadores invitados'}
                   </span>
                 </div>
-                <Switch
-                  checked={isPublic}
-                  onCheckedChange={setIsPublic}
-                  aria-label="Toggle visibility"
-                />
+                <div onClick={(e) => e.stopPropagation()}>
+                  <Switch
+                    checked={isPublic}
+                    onCheckedChange={setIsPublic}
+                    aria-label="Toggle visibility"
+                  />
+                </div>
               </div>
             </div>
 
