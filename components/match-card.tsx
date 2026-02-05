@@ -12,6 +12,7 @@ interface Match {
   created_by_user_id: number
   creator_name: string
   participant_count: number
+  title: string | null
 }
 
 interface MatchCardProps {
@@ -61,22 +62,24 @@ export function MatchCard({ match, currentUserId, isPast }: MatchCardProps) {
 
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2 mb-1">
-              <Clock className="w-4 h-4 text-muted-foreground" />
-              <span className="font-semibold text-foreground">{time} hs</span>
+              <span className="font-semibold text-foreground truncate">
+                {match.title || `Partido de ${match.creator_name}`}
+              </span>
               {isCreator && (
-                <Badge variant="secondary" className="text-xs">Tu partido</Badge>
+                <Badge variant="secondary" className="text-xs shrink-0">Tu partido</Badge>
               )}
             </div>
             
             <div className="flex items-center gap-2 text-sm text-muted-foreground">
-              <MapPin className="w-4 h-4" />
+              <Clock className="w-4 h-4" />
+              <span>{time} hs</span>
+              <MapPin className="w-4 h-4 ml-2" />
               <span className="truncate">{location}</span>
             </div>
 
             <div className="flex items-center gap-2 text-sm text-muted-foreground mt-1">
               <Users className="w-4 h-4" />
               <span>{match.participant_count} anotados</span>
-              <span className="text-xs">- Organiza {match.creator_name}</span>
             </div>
           </div>
 

@@ -40,6 +40,8 @@ export default function NuevoPartidoPage() {
   const [isPublic, setIsPublic] = useState(true)
   const [title, setTitle] = useState('')
   const [teamCount, setTeamCount] = useState(0) // 0 = no teams, 2 = two teams
+  const [customTeamCount, setCustomTeamCount] = useState('')
+  const [useCustomTeamCount, setUseCustomTeamCount] = useState(false)
   const [teamSize, setTeamSize] = useState(5)
   const [customTeamSize, setCustomTeamSize] = useState('')
   const [useCustomTeamSize, setUseCustomTeamSize] = useState(false)
@@ -68,7 +70,8 @@ export default function NuevoPartidoPage() {
     formData.set('locationType', locationType)
     formData.set('isPublic', isPublic.toString())
     formData.set('title', title)
-    formData.set('teamCount', teamCount.toString())
+    const finalTeamCount = useCustomTeamCount && customTeamCount ? parseInt(customTeamCount) : teamCount
+    formData.set('teamCount', finalTeamCount.toString())
     const finalTeamSize = useCustomTeamSize && customTeamSize ? parseInt(customTeamSize) : teamSize
     formData.set('teamSize', finalTeamSize.toString())
     
@@ -110,6 +113,20 @@ export default function NuevoPartidoPage() {
         </CardHeader>
         <CardContent>
           <form onSubmit={handleSubmit} className="flex flex-col gap-6">
+            {/* Match title - FIRST */}
+            <div className="flex flex-col gap-3">
+              <Label className="flex items-center gap-2">
+                <Pencil className="w-4 h-4 text-primary" />
+                Titulo (opcional)
+              </Label>
+              <Input
+                value={title}
+                onChange={(e) => setTitle(e.target.value)}
+                placeholder="Partido de fulano (por defecto)"
+                maxLength={100}
+              />
+            </div>
+
             {/* Date selection */}
             <div className="flex flex-col gap-3">
               <Label className="flex items-center gap-2">
@@ -254,32 +271,21 @@ export default function NuevoPartidoPage() {
               </div>
             )}
 
-            {/* Match title */}
-            <div className="flex flex-col gap-3">
-              <Label className="flex items-center gap-2">
-                <Pencil className="w-4 h-4 text-primary" />
-                Titulo (opcional)
-              </Label>
-              <Input
-                value={title}
-                onChange={(e) => setTitle(e.target.value)}
-                placeholder="Partido de fulano (por defecto)"
-                maxLength={100}
-              />
-            </div>
-
             {/* Team configuration */}
             <div className="flex flex-col gap-3">
               <Label className="flex items-center gap-2">
                 <Users className="w-4 h-4 text-primary" />
                 Equipos
               </Label>
-              <div className="grid grid-cols-2 gap-2">
+              <div className="grid grid-cols-3 gap-2">
                 <button
                   type="button"
-                  onClick={() => setTeamCount(0)}
+                  onClick={() => {
+                    setTeamCount(0)
+                    setUseCustomTeamCount(false)
+                  }}
                   className={`py-2 px-3 rounded-lg border-2 font-medium transition-all ${
-                    teamCount === 0
+                    !useCustomTeamCount && teamCount === 0
                       ? 'border-primary bg-primary/10 text-primary'
                       : 'border-border hover:border-primary/50 hover:bg-muted/50'
                   }`}
@@ -288,18 +294,43 @@ export default function NuevoPartidoPage() {
                 </button>
                 <button
                   type="button"
-                  onClick={() => setTeamCount(2)}
+                  onClick={() => {
+                    setTeamCount(2)
+                    setUseCustomTeamCount(false)
+                  }}
                   className={`py-2 px-3 rounded-lg border-2 font-medium transition-all ${
-                    teamCount === 2
+                    !useCustomTeamCount && teamCount === 2
                       ? 'border-primary bg-primary/10 text-primary'
                       : 'border-border hover:border-primary/50 hover:bg-muted/50'
                   }`}
                 >
                   2 equipos
                 </button>
+                <button
+                  type="button"
+                  onClick={() => setUseCustomTeamCount(true)}
+                  className={`py-2 px-3 rounded-lg border-2 font-medium transition-all ${
+                    useCustomTeamCount
+                      ? 'border-primary bg-primary/10 text-primary'
+                      : 'border-border hover:border-primary/50 hover:bg-muted/50'
+                  }`}
+                >
+                  Otro
+                </button>
               </div>
               
-              {teamCount > 0 && (
+              {useCustomTeamCount && (
+                <Input
+                  type="number"
+                  min="2"
+                  max="20"
+                  value={customTeamCount}
+                  onChange={(e) => setCustomTeamCount(e.target.value)}
+                  placeholder="Cantidad de equipos"
+                />
+              )}
+              
+              {(teamCount > 0 || useCustomTeamCount) && (
                 <div className="flex flex-col gap-2 p-3 rounded-lg border border-border bg-muted/30">
                   <Label className="text-sm text-muted-foreground">Jugadores por equipo</Label>
                   <div className="grid grid-cols-3 gap-2">
@@ -364,9 +395,16 @@ export default function NuevoPartidoPage() {
                 {isPublic ? <Globe className="w-4 h-4 text-primary" /> : <Lock className="w-4 h-4 text-primary" />}
                 Visibilidad
               </Label>
-              <button
-                type="button"
+              <div
+                role="button"
+                tabIndex={0}
                 onClick={() => setIsPublic(!isPublic)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault()
+                    setIsPublic(!isPublic)
+                  }
+                }}
                 className={`flex items-center justify-between p-3 rounded-lg border-2 transition-all text-left cursor-pointer ${
                   isPublic ? 'border-primary bg-primary/10' : 'border-border hover:border-muted-foreground/50'
                 }`}
@@ -385,9 +423,8 @@ export default function NuevoPartidoPage() {
                   checked={isPublic}
                   onCheckedChange={setIsPublic}
                   aria-label="Toggle visibility"
-                  onClick={(e) => e.stopPropagation()}
                 />
-              </button>
+              </div>
             </div>
 
             {error && (
