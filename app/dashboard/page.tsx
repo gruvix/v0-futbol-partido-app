@@ -15,7 +15,6 @@ interface Match {
   created_by_user_id: number
   creator_name: string
   participant_count: number
-  title: string | null
 }
 
 async function getUpcomingMatches(): Promise<Match[]> {
@@ -27,7 +26,6 @@ async function getUpcomingMatches(): Promise<Match[]> {
       m.location_type,
       m.location_custom,
       m.created_by_user_id,
-      m.title,
       u.name as creator_name,
       COUNT(mp.id)::int as participant_count
     FROM matches m
@@ -50,7 +48,6 @@ async function getPastMatches(): Promise<Match[]> {
       m.location_type,
       m.location_custom,
       m.created_by_user_id,
-      m.title,
       u.name as creator_name,
       COUNT(mp.id)::int as participant_count
     FROM matches m
