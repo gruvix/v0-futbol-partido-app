@@ -4,11 +4,18 @@ import { useState } from 'react'
 import Link from 'next/link'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
-import { ChevronLeft, ChevronRight, MapPin, Users } from 'lucide-react'
+import { ChevronLeft, ChevronRight, MapPin, Clock, X } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
 
 interface MatchSummary {
   id: number
+  title: string | null
   date_time: string
   location_type: string
   location_custom: string | null
@@ -36,6 +43,7 @@ export function CalendarView({ matches }: CalendarViewProps) {
   const today = new Date()
   const [currentMonth, setCurrentMonth] = useState(today.getMonth())
   const [currentYear, setCurrentYear] = useState(today.getFullYear())
+  const [selectedDay, setSelectedDay] = useState<number | null>(null)
 
   const firstDayOfMonth = new Date(currentYear, currentMonth, 1)
   const lastDayOfMonth = new Date(currentYear, currentMonth + 1, 0)
@@ -64,9 +72,9 @@ export function CalendarView({ matches }: CalendarViewProps) {
     return matches.filter(match => {
       const matchDate = new Date(match.date_time)
       return (
-        matchDate.getDate() === day &&
-        matchDate.getMonth() === currentMonth &&
-        matchDate.getFullYear() === currentYear
+        matchDate.getUTCDate() === day &&
+        matchDate.getUTCMonth() === currentMonth &&
+        matchDate.getUTCFullYear() === currentYear
       )
     })
   }
@@ -96,123 +104,183 @@ export function CalendarView({ matches }: CalendarViewProps) {
     return date < new Date(today.getFullYear(), today.getMonth(), today.getDate())
   }
 
+  const selectedDayMatches = selectedDay ? getMatchesForDay(selectedDay) : []
+
   return (
-    <Card>
-      <CardContent className="p-4">
-        {/* Month navigation */}
-        <div className="flex items-center justify-between mb-4">
-          <Button variant="ghost" size="sm" onClick={prevMonth}>
-            <ChevronLeft className="w-4 h-4" />
-          </Button>
-          <h2 className="text-lg font-semibold text-foreground">
-            {monthNames[currentMonth]} {currentYear}
-          </h2>
-          <Button variant="ghost" size="sm" onClick={nextMonth}>
-            <ChevronRight className="w-4 h-4" />
-          </Button>
-        </div>
+    <>
+      <Card>
+        <CardContent className="p-4">
+          {/* Month navigation */}
+          <div className="flex items-center justify-between mb-4">
+            <Button variant="ghost" size="sm" onClick={prevMonth}>
+              <ChevronLeft className="w-4 h-4" />
+            </Button>
+            <h2 className="text-lg font-semibold text-foreground">
+              {monthNames[currentMonth]} {currentYear}
+            </h2>
+            <Button variant="ghost" size="sm" onClick={nextMonth}>
+              <ChevronRight className="w-4 h-4" />
+            </Button>
+          </div>
 
-        {/* Day headers */}
-        <div className="grid grid-cols-7 gap-1 mb-2">
-          {dayNames.map(day => (
-            <div
-              key={day}
-              className="text-center text-xs font-medium text-muted-foreground py-2"
-            >
-              {day}
-            </div>
-          ))}
-        </div>
-
-        {/* Calendar grid */}
-        <div className="grid grid-cols-7 gap-1">
-          {calendarDays.map((day, index) => {
-            if (day === null) {
-              return <div key={`empty-${index}`} className="aspect-square" />
-            }
-
-            const dayMatches = getMatchesForDay(day)
-            const hasMatches = dayMatches.length > 0
-
-            return (
+          {/* Day headers */}
+          <div className="grid grid-cols-7 gap-1 mb-2">
+            {dayNames.map(day => (
               <div
                 key={day}
-                className={cn(
-                  'aspect-square p-1 rounded-lg transition-colors relative',
-                  isToday(day) && 'bg-primary/10 ring-2 ring-primary',
-                  isPast(day) && 'opacity-50',
-                  hasMatches && !isPast(day) && 'bg-accent/20'
-                )}
+                className="text-center text-xs font-medium text-muted-foreground py-2"
               >
-                <span
+                {day}
+              </div>
+            ))}
+          </div>
+
+          {/* Calendar grid */}
+          <div className="grid grid-cols-7 gap-1">
+            {calendarDays.map((day, index) => {
+              if (day === null) {
+                return <div key={`empty-${index}`} className="aspect-square" />
+              }
+
+              const dayMatches = getMatchesForDay(day)
+              const hasMatches = dayMatches.length > 0
+
+              return (
+                <button
+                  key={day}
+                  type="button"
+                  onClick={() => hasMatches && setSelectedDay(day)}
                   className={cn(
-                    'text-sm font-medium',
-                    isToday(day) ? 'text-primary' : 'text-foreground'
+                    'aspect-square p-1 rounded-lg transition-colors relative',
+                    isToday(day) && 'bg-primary/10 ring-2 ring-primary',
+                    isPast(day) && 'opacity-50',
+                    hasMatches && !isPast(day) && 'bg-accent/20 hover:bg-accent/30 cursor-pointer',
+                    !hasMatches && 'cursor-default'
                   )}
                 >
-                  {day}
-                </span>
-                {hasMatches && (
-                  <div className="absolute bottom-1 left-1/2 -translate-x-1/2 flex gap-0.5">
-                    {dayMatches.slice(0, 3).map((_, i) => (
-                      <div
-                        key={i}
-                        className="w-1.5 h-1.5 rounded-full bg-primary"
-                      />
-                    ))}
-                  </div>
-                )}
-              </div>
-            )
-          })}
-        </div>
+                  <span
+                    className={cn(
+                      'text-sm font-medium',
+                      isToday(day) ? 'text-primary' : 'text-foreground'
+                    )}
+                  >
+                    {day}
+                  </span>
+                  {hasMatches && (
+                    <div className="absolute bottom-1 left-1/2 -translate-x-1/2 flex gap-0.5">
+                      {dayMatches.slice(0, 3).map((_, i) => (
+                        <div
+                          key={i}
+                          className="w-1.5 h-1.5 rounded-full bg-primary"
+                        />
+                      ))}
+                    </div>
+                  )}
+                </button>
+              )
+            })}
+          </div>
 
-        {/* Upcoming matches list */}
-        <div className="mt-6 flex flex-col gap-2">
-          <h3 className="text-sm font-semibold text-foreground">Proximos partidos</h3>
-          {matches.filter(m => new Date(m.date_time) >= today).length === 0 ? (
-            <p className="text-sm text-muted-foreground">No hay partidos programados</p>
-          ) : (
-            <div className="flex flex-col gap-2">
-              {matches
-                .filter(m => new Date(m.date_time) >= today)
-                .slice(0, 5)
-                .map(match => {
-                  const date = new Date(match.date_time)
-                  const location = match.location_type === 'OTRO' && match.location_custom
-                    ? match.location_custom
-                    : locationLabels[match.location_type]
-                  
-                  return (
-                    <Link
-                      key={match.id}
-                      href={`/dashboard/partido/${match.id}`}
-                      className="flex items-center gap-3 p-2 rounded-lg hover:bg-muted/50 transition-colors"
-                    >
-                      <div className="flex flex-col items-center justify-center min-w-[40px] py-1 px-2 rounded bg-primary/10">
-                        <span className="text-lg font-bold text-primary">{date.getDate()}</span>
-                        <span className="text-[10px] text-muted-foreground uppercase">
-                          {monthNames[date.getMonth()].slice(0, 3)}
-                        </span>
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm font-medium text-foreground">
-                          {date.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' })} hs
-                        </p>
-                        <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                          <MapPin className="w-3 h-3" />
-                          <span>{location}</span>
-                          <Users className="w-3 h-3 ml-1" />
-                          <span>{match.participant_count}</span>
+          {/* Upcoming matches list */}
+          <div className="mt-6 flex flex-col gap-2">
+            <h3 className="text-sm font-semibold text-foreground">Proximos partidos</h3>
+            {matches.filter(m => new Date(m.date_time) >= today).length === 0 ? (
+              <p className="text-sm text-muted-foreground">No hay partidos programados</p>
+            ) : (
+              <div className="flex flex-col gap-2">
+                {matches
+                  .filter(m => new Date(m.date_time) >= today)
+                  .slice(0, 5)
+                  .map(match => {
+                    const date = new Date(match.date_time)
+                    const location = match.location_type === 'OTRO' && match.location_custom
+                      ? match.location_custom
+                      : locationLabels[match.location_type]
+                    const hours = date.getUTCHours().toString().padStart(2, '0')
+                    const minutes = date.getUTCMinutes().toString().padStart(2, '0')
+                    
+                    return (
+                      <Link
+                        key={match.id}
+                        href={`/dashboard/partido/${match.id}`}
+                        className="flex items-center gap-3 p-2 rounded-lg hover:bg-muted/50 transition-colors"
+                      >
+                        <div className="flex flex-col items-center justify-center min-w-[40px] py-1 px-2 rounded bg-primary/10">
+                          <span className="text-lg font-bold text-primary">{date.getUTCDate()}</span>
+                          <span className="text-[10px] text-muted-foreground uppercase">
+                            {monthNames[date.getUTCMonth()].slice(0, 3)}
+                          </span>
                         </div>
-                      </div>
-                    </Link>
-                  )
-                })}
-            </div>
-          )}
-        </div>
-      </CardContent>
-    </Card>
+                        <div className="flex-1 min-w-0">
+                          {match.title && (
+                            <p className="text-sm font-medium text-foreground truncate">{match.title}</p>
+                          )}
+                          <p className={`text-sm ${match.title ? 'text-muted-foreground' : 'font-medium text-foreground'}`}>
+                            {hours}:{minutes} hs
+                          </p>
+                          <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                            <MapPin className="w-3 h-3" />
+                            <span>{location}</span>
+                          </div>
+                        </div>
+                      </Link>
+                    )
+                  })}
+              </div>
+            )}
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Day matches modal */}
+      <Dialog open={selectedDay !== null} onOpenChange={(open) => !open && setSelectedDay(null)}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center justify-between">
+              <span>
+                {selectedDay} de {monthNames[currentMonth]}
+              </span>
+            </DialogTitle>
+          </DialogHeader>
+          <div className="flex flex-col gap-3 py-2">
+            {selectedDayMatches.length === 0 ? (
+              <p className="text-sm text-muted-foreground">No hay partidos este dia</p>
+            ) : (
+              selectedDayMatches.map(match => {
+                const date = new Date(match.date_time)
+                const location = match.location_type === 'OTRO' && match.location_custom
+                  ? match.location_custom
+                  : locationLabels[match.location_type]
+                const hours = date.getUTCHours().toString().padStart(2, '0')
+                const minutes = date.getUTCMinutes().toString().padStart(2, '0')
+                
+                return (
+                  <Link
+                    key={match.id}
+                    href={`/dashboard/partido/${match.id}`}
+                    onClick={() => setSelectedDay(null)}
+                    className="flex flex-col gap-1 p-3 rounded-lg border border-border hover:bg-muted/50 transition-colors"
+                  >
+                    {match.title && (
+                      <p className="font-medium text-foreground">{match.title}</p>
+                    )}
+                    <div className="flex items-center gap-3 text-sm text-muted-foreground">
+                      <span className="flex items-center gap-1">
+                        <Clock className="w-3.5 h-3.5" />
+                        {hours}:{minutes} hs
+                      </span>
+                      <span className="flex items-center gap-1">
+                        <MapPin className="w-3.5 h-3.5" />
+                        {location}
+                      </span>
+                    </div>
+                  </Link>
+                )
+              })
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
+    </>
   )
 }

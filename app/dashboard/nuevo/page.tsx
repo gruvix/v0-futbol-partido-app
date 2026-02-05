@@ -9,7 +9,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
 import { Input } from '@/components/ui/input'
 import { createMatch } from '@/app/actions/matches'
-import { ArrowLeft, Calendar, Clock, MapPin, Globe, Lock } from 'lucide-react'
+import { ArrowLeft, Calendar, Clock, MapPin, Globe, Lock, Users, Pencil } from 'lucide-react'
 import { Switch } from '@/components/ui/switch'
 import Link from 'next/link'
 import { useActionLoader } from '@/components/football-loader'
@@ -32,12 +32,19 @@ const PICKER_MINUTES = ['00', '15', '30', '45']
 export default function NuevoPartidoPage() {
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
+  const [title, setTitle] = useState('')
   const [locationType, setLocationType] = useState('TERRAZAS')
   const [selectedTime, setSelectedTime] = useState('21:00')
   const [customHour, setCustomHour] = useState('21')
   const [customMinute, setCustomMinute] = useState('00')
   const [useCustomTime, setUseCustomTime] = useState(false)
   const [isPublic, setIsPublic] = useState(true)
+  const [teamCount, setTeamCount] = useState(0) // 0 = no teams, 2 = two teams
+  const [customTeamCount, setCustomTeamCount] = useState('')
+  const [useCustomTeamCount, setUseCustomTeamCount] = useState(false)
+  const [teamSize, setTeamSize] = useState(5)
+  const [customTeamSize, setCustomTeamSize] = useState('')
+  const [useCustomTeamSize, setUseCustomTeamSize] = useState(false)
   const router = useRouter()
   const { showLoader, hideLoader } = useActionLoader()
 
@@ -52,6 +59,9 @@ export default function NuevoPartidoPage() {
   
   const dayNames = ['Dom', 'Lun', 'Mar', 'Mie', 'Jue', 'Vie', 'Sab']
 
+  // Calculate actual team count
+  const actualTeamCount = useCustomTeamCount && customTeamCount ? parseInt(customTeamCount) : teamCount
+
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault()
     setError('')
@@ -62,6 +72,10 @@ export default function NuevoPartidoPage() {
     formData.set('time', useCustomTime ? `${customHour}:${customMinute}` : selectedTime)
     formData.set('locationType', locationType)
     formData.set('isPublic', isPublic.toString())
+    formData.set('title', title)
+    formData.set('teamCount', actualTeamCount.toString())
+    const finalTeamSize = useCustomTeamSize && customTeamSize ? parseInt(customTeamSize) : teamSize
+    formData.set('teamSize', finalTeamSize.toString())
     
     if (locationType === 'OTRO') {
       const customLocation = (e.currentTarget.elements.namedItem('locationCustom') as HTMLInputElement)?.value
@@ -101,6 +115,20 @@ export default function NuevoPartidoPage() {
         </CardHeader>
         <CardContent>
           <form onSubmit={handleSubmit} className="flex flex-col gap-6">
+            {/* Match title - FIRST */}
+            <div className="flex flex-col gap-3">
+              <Label className="flex items-center gap-2">
+                <Pencil className="w-4 h-4 text-primary" />
+                Titulo (opcional)
+              </Label>
+              <Input
+                value={title}
+                onChange={(e) => setTitle(e.target.value)}
+                placeholder="Partido de fulano (por defecto)"
+                maxLength={100}
+              />
+            </div>
+
             {/* Date selection */}
             <div className="flex flex-col gap-3">
               <Label className="flex items-center gap-2">
@@ -245,15 +273,136 @@ export default function NuevoPartidoPage() {
               </div>
             )}
 
+            {/* Team configuration */}
+            <div className="flex flex-col gap-3">
+              <Label className="flex items-center gap-2">
+                <Users className="w-4 h-4 text-primary" />
+                Equipos
+              </Label>
+              <div className="grid grid-cols-3 gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setTeamCount(0)
+                    setUseCustomTeamCount(false)
+                  }}
+                  className={`py-2 px-3 rounded-lg border-2 font-medium transition-all ${
+                    !useCustomTeamCount && teamCount === 0
+                      ? 'border-primary bg-primary/10 text-primary'
+                      : 'border-border hover:border-primary/50 hover:bg-muted/50'
+                  }`}
+                >
+                  Sin equipos
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setTeamCount(2)
+                    setUseCustomTeamCount(false)
+                  }}
+                  className={`py-2 px-3 rounded-lg border-2 font-medium transition-all ${
+                    !useCustomTeamCount && teamCount === 2
+                      ? 'border-primary bg-primary/10 text-primary'
+                      : 'border-border hover:border-primary/50 hover:bg-muted/50'
+                  }`}
+                >
+                  2 Equipos
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setUseCustomTeamCount(true)}
+                  className={`py-2 px-3 rounded-lg border-2 font-medium transition-all ${
+                    useCustomTeamCount
+                      ? 'border-primary bg-primary/10 text-primary'
+                      : 'border-border hover:border-primary/50 hover:bg-muted/50'
+                  }`}
+                >
+                  Otro
+                </button>
+              </div>
+              
+              {useCustomTeamCount && (
+                <Input
+                  type="number"
+                  min="2"
+                  max="10"
+                  value={customTeamCount}
+                  onChange={(e) => setCustomTeamCount(e.target.value)}
+                  placeholder="Cantidad de equipos"
+                  className="mt-1"
+                />
+              )}
+              
+              {actualTeamCount > 0 && (
+                <div className="flex flex-col gap-2 p-3 rounded-lg border border-border bg-muted/30">
+                  <Label className="text-sm text-muted-foreground">Jugadores por equipo</Label>
+                  <div className="grid grid-cols-3 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setTeamSize(5)
+                        setUseCustomTeamSize(false)
+                      }}
+                      className={`py-2 px-3 rounded-lg border-2 font-medium transition-all ${
+                        !useCustomTeamSize && teamSize === 5
+                          ? 'border-primary bg-primary/10 text-primary'
+                          : 'border-border hover:border-primary/50 hover:bg-muted/50'
+                      }`}
+                    >
+                      5
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setTeamSize(10)
+                        setUseCustomTeamSize(false)
+                      }}
+                      className={`py-2 px-3 rounded-lg border-2 font-medium transition-all ${
+                        !useCustomTeamSize && teamSize === 10
+                          ? 'border-primary bg-primary/10 text-primary'
+                          : 'border-border hover:border-primary/50 hover:bg-muted/50'
+                      }`}
+                    >
+                      10
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setUseCustomTeamSize(true)}
+                      className={`py-2 px-3 rounded-lg border-2 font-medium transition-all ${
+                        useCustomTeamSize
+                          ? 'border-primary bg-primary/10 text-primary'
+                          : 'border-border hover:border-primary/50 hover:bg-muted/50'
+                      }`}
+                    >
+                      Otro
+                    </button>
+                  </div>
+                  {useCustomTeamSize && (
+                    <Input
+                      type="number"
+                      min="1"
+                      max="50"
+                      value={customTeamSize}
+                      onChange={(e) => setCustomTeamSize(e.target.value)}
+                      placeholder="Cantidad de jugadores"
+                      className="mt-1"
+                    />
+                  )}
+                </div>
+              )}
+            </div>
+
             {/* Visibility toggle */}
             <div className="flex flex-col gap-3">
               <Label className="flex items-center gap-2">
                 {isPublic ? <Globe className="w-4 h-4 text-primary" /> : <Lock className="w-4 h-4 text-primary" />}
                 Visibilidad
               </Label>
-              <button
-                type="button"
+              <div
+                role="button"
+                tabIndex={0}
                 onClick={() => setIsPublic(!isPublic)}
+                onKeyDown={(e) => e.key === 'Enter' && setIsPublic(!isPublic)}
                 className={`flex items-center justify-between p-3 rounded-lg border-2 transition-all text-left cursor-pointer ${
                   isPublic ? 'border-primary bg-primary/10' : 'border-border hover:border-muted-foreground/50'
                 }`}
@@ -272,9 +421,8 @@ export default function NuevoPartidoPage() {
                   checked={isPublic}
                   onCheckedChange={setIsPublic}
                   aria-label="Toggle visibility"
-                  onClick={(e) => e.stopPropagation()}
                 />
-              </button>
+              </div>
             </div>
 
             {error && (

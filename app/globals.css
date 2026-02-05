@@ -18,6 +18,8 @@
   --muted-foreground: oklch(0.5 0.02 220);
   --accent: oklch(0.75 0.12 85);
   --accent-foreground: oklch(0.2 0.05 85);
+  --golden: #FFB81C;
+  --golden-foreground: oklch(0.14 0.02 220);
   --destructive: oklch(0.55 0.22 25);
   --destructive-foreground: oklch(0.98 0 0);
   --border: oklch(0.88 0.02 220);
@@ -54,6 +56,8 @@
   --muted-foreground: oklch(0.65 0.02 220);
   --accent: oklch(0.7 0.12 85);
   --accent-foreground: oklch(0.14 0.02 85);
+  --golden: #FFB81C;
+  --golden-foreground: oklch(0.14 0.02 220);
   --destructive: oklch(0.5 0.2 25);
   --destructive-foreground: oklch(0.95 0 0);
   --border: oklch(0.28 0.02 220);
@@ -101,6 +105,8 @@
   --color-chart-3: var(--chart-3);
   --color-chart-4: var(--chart-4);
   --color-chart-5: var(--chart-5);
+  --color-golden: var(--golden);
+  --color-golden-foreground: var(--golden-foreground);
   --radius-sm: calc(var(--radius) - 4px);
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);

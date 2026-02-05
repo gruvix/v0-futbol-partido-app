@@ -6,6 +6,7 @@ import { cn } from '@/lib/utils'
 
 interface Match {
   id: number
+  title: string | null
   date_time: string
   location_type: string
   location_custom: string | null
@@ -60,9 +61,12 @@ export function MatchCard({ match, currentUserId, isPast }: MatchCardProps) {
           </div>
 
           <div className="flex-1 min-w-0">
+            {match.title && (
+              <p className="font-semibold text-foreground truncate mb-0.5">{match.title}</p>
+            )}
             <div className="flex items-center gap-2 mb-1">
               <Clock className="w-4 h-4 text-muted-foreground" />
-              <span className="font-semibold text-foreground">{time} hs</span>
+              <span className={`${match.title ? 'text-sm' : 'font-semibold'} text-foreground`}>{time} hs</span>
               {isCreator && (
                 <Badge variant="secondary" className="text-xs">Tu partido</Badge>
               )}

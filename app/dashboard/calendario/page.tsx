@@ -3,6 +3,7 @@ import { CalendarView } from '@/components/calendar-view'
 
 interface MatchSummary {
   id: number
+  title: string | null
   date_time: string
   location_type: string
   location_custom: string | null
@@ -13,6 +14,7 @@ async function getMatchesForCalendar(): Promise<MatchSummary[]> {
   const matches = await sql`
     SELECT 
       m.id,
+      m.title,
       m.date_time,
       m.location_type,
       m.location_custom,

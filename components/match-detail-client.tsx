@@ -35,6 +35,7 @@ import {
 
 interface Match {
   id: number
+  title: string | null
   date_time: string
   location_type: string
   location_custom: string | null
@@ -85,6 +86,7 @@ export function MatchDetailClient({
   const [showInviteDialog, setShowInviteDialog] = useState(false)
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
   const [showLastPlayerConfirm, setShowLastPlayerConfirm] = useState(false)
+  const [showLeaveConfirm, setShowLeaveConfirm] = useState(false)
   const router = useRouter()
   const { showLoader, hideLoader } = useActionLoader()
 
@@ -121,7 +123,12 @@ export function MatchDetailClient({
     setLoading(null)
   }
 
-  async function handleLeave() {
+  function handleLeaveClick() {
+    setShowLeaveConfirm(true)
+  }
+
+  async function handleLeaveConfirmed() {
+    setShowLeaveConfirm(false)
     setLoading('leave')
     setError('')
     showLoader('Abandonando partido...')
@@ -183,10 +190,13 @@ export function MatchDetailClient({
         <CardHeader className="pb-4">
           <div className="flex items-start justify-between">
             <div>
-              <CardTitle className="text-xl text-foreground flex items-center gap-2">
+              {match.title && (
+                <CardTitle className="text-xl text-foreground mb-2">{match.title}</CardTitle>
+              )}
+              <div className={`${match.title ? 'text-base' : 'text-xl'} text-foreground flex items-center gap-2`}>
                 <Calendar className="w-5 h-5 text-primary" />
                 {formattedDate}
-              </CardTitle>
+              </div>
               <div className="flex items-center gap-4 mt-2 text-muted-foreground">
                 <span className="flex items-center gap-1">
                   <Clock className="w-4 h-4" />
@@ -221,7 +231,7 @@ export function MatchDetailClient({
                   <Button
                     variant="destructive"
                     size="sm"
-                    onClick={handleLeave}
+                    onClick={handleLeaveClick}
                     disabled={isLoading}
                     className="gap-2"
                   >
@@ -429,6 +439,24 @@ export function MatchDetailClient({
             <AlertDialogCancel>Dejar el partido</AlertDialogCancel>
             <AlertDialogAction onClick={handleDelete} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
               Eliminar partido
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Leave Confirmation Dialog */}
+      <AlertDialog open={showLeaveConfirm} onOpenChange={setShowLeaveConfirm}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Abandonar partido</AlertDialogTitle>
+            <AlertDialogDescription>
+              Seguro que queres abandonar este partido?
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogAction onClick={handleLeaveConfirmed} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+              Abandonar
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
