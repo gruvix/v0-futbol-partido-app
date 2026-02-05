@@ -9,7 +9,8 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
 import { Input } from '@/components/ui/input'
 import { createMatch } from '@/app/actions/matches'
-import { ArrowLeft, Calendar, Clock, MapPin } from 'lucide-react'
+import { ArrowLeft, Calendar, Clock, MapPin, Globe, Lock } from 'lucide-react'
+import { Switch } from '@/components/ui/switch'
 import Link from 'next/link'
 import { useActionLoader } from '@/components/football-loader'
 
@@ -31,6 +32,7 @@ export default function NuevoPartidoPage() {
   const [selectedTime, setSelectedTime] = useState('21:00')
   const [customTime, setCustomTime] = useState('')
   const [useCustomTime, setUseCustomTime] = useState(false)
+  const [isPublic, setIsPublic] = useState(true)
   const router = useRouter()
   const { showLoader, hideLoader } = useActionLoader()
 
@@ -54,6 +56,7 @@ export default function NuevoPartidoPage() {
     formData.set('date', selectedDate)
     formData.set('time', useCustomTime ? customTime : selectedTime)
     formData.set('locationType', locationType)
+    formData.set('isPublic', isPublic.toString())
     
     if (locationType === 'OTRO') {
       const customLocation = (e.currentTarget.elements.namedItem('locationCustom') as HTMLInputElement)?.value
@@ -223,6 +226,33 @@ export default function NuevoPartidoPage() {
                 />
               </div>
             )}
+
+            {/* Visibility toggle */}
+            <div className="flex flex-col gap-3">
+              <Label className="flex items-center gap-2">
+                {isPublic ? <Globe className="w-4 h-4 text-primary" /> : <Lock className="w-4 h-4 text-primary" />}
+                Visibilidad
+              </Label>
+              <div className={`flex items-center justify-between p-3 rounded-lg border-2 transition-all ${
+                isPublic ? 'border-primary bg-primary/10' : 'border-border'
+              }`}>
+                <div className="flex flex-col gap-0.5">
+                  <span className="font-medium text-sm">
+                    {isPublic ? 'Publico' : 'Privado'}
+                  </span>
+                  <span className="text-xs text-muted-foreground">
+                    {isPublic 
+                      ? 'Visible para todos en el dashboard' 
+                      : 'Solo visible para jugadores invitados'}
+                  </span>
+                </div>
+                <Switch
+                  checked={isPublic}
+                  onCheckedChange={setIsPublic}
+                  aria-label="Toggle visibility"
+                />
+              </div>
+            </div>
 
             {error && (
               <p className="text-sm text-destructive text-center">{error}</p>

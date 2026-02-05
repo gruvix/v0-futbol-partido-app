@@ -14,6 +14,7 @@ export async function createMatch(formData: FormData) {
   const time = formData.get('time') as string
   const locationType = formData.get('locationType') as string
   const locationCustom = formData.get('locationCustom') as string
+  const isPublic = formData.get('isPublic') !== 'false' // default to true
 
   if (!dateStr || !time || !locationType) {
     return { error: 'Todos los campos son requeridos' }
@@ -27,8 +28,8 @@ export async function createMatch(formData: FormData) {
 
   try {
     const result = await sql`
-      INSERT INTO matches (created_by_user_id, date_time, location_type, location_custom)
-      VALUES (${session.userId}, ${dateTime.toISOString()}, ${locationType}, ${locationCustom || null})
+      INSERT INTO matches (created_by_user_id, date_time, location_type, location_custom, is_public)
+      VALUES (${session.userId}, ${dateTime.toISOString()}, ${locationType}, ${locationCustom || null}, ${isPublic})
       RETURNING id
     `
     

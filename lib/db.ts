@@ -66,14 +66,16 @@ export async function initializeDatabase() {
       date_time TIMESTAMP WITH TIME ZONE NOT NULL,
       location_type location_type NOT NULL DEFAULT 'TERRAZAS',
       location_custom VARCHAR(255),
+      is_public BOOLEAN DEFAULT true,
       created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
     )
   `
   
-  // Add title and emoji columns if they don't exist (for existing databases)
+  // Add title, emoji, and visibility columns if they don't exist (for existing databases)
   try {
     await sql`ALTER TABLE matches ADD COLUMN IF NOT EXISTS title VARCHAR(100)`
     await sql`ALTER TABLE matches ADD COLUMN IF NOT EXISTS emoji VARCHAR(10)`
+    await sql`ALTER TABLE matches ADD COLUMN IF NOT EXISTS is_public BOOLEAN DEFAULT true`
   } catch {
     // Columns might already exist
   }
