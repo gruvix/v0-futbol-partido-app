@@ -15,22 +15,27 @@ import Link from 'next/link'
 import { useActionLoader } from '@/components/football-loader'
 
 const COMMON_TIMES = [
+  { label: '16:00', value: '16:00' },
+  { label: '17:00', value: '17:00' },
+  { label: '18:00', value: '18:00' },
   { label: '19:00', value: '19:00' },
-  { label: '19:30', value: '19:30' },
   { label: '20:00', value: '20:00' },
-  { label: '20:30', value: '20:30' },
   { label: '21:00', value: '21:00' },
-  { label: '21:30', value: '21:30' },
   { label: '22:00', value: '22:00' },
-  { label: '22:30', value: '22:30' },
+  { label: '23:00', value: '23:00' },
 ]
+
+// Available hours and minutes for custom time picker
+const PICKER_HOURS = Array.from({ length: 24 }, (_, i) => i.toString().padStart(2, '0'))
+const PICKER_MINUTES = ['00', '15', '30', '45']
 
 export default function NuevoPartidoPage() {
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
   const [locationType, setLocationType] = useState('TERRAZAS')
   const [selectedTime, setSelectedTime] = useState('21:00')
-  const [customTime, setCustomTime] = useState('')
+  const [customHour, setCustomHour] = useState('21')
+  const [customMinute, setCustomMinute] = useState('00')
   const [useCustomTime, setUseCustomTime] = useState(false)
   const [isPublic, setIsPublic] = useState(true)
   const router = useRouter()
@@ -54,7 +59,7 @@ export default function NuevoPartidoPage() {
 
     const formData = new FormData()
     formData.set('date', selectedDate)
-    formData.set('time', useCustomTime ? customTime : selectedTime)
+    formData.set('time', useCustomTime ? `${customHour}:${customMinute}` : selectedTime)
     formData.set('locationType', locationType)
     formData.set('isPublic', isPublic.toString())
     
@@ -153,27 +158,40 @@ export default function NuevoPartidoPage() {
                   )
                 })}
               </div>
-              <div className="flex items-center gap-2 mt-1">
-                <input
-                  type="checkbox"
-                  id="customTime"
-                  checked={useCustomTime}
-                  onChange={(e) => setUseCustomTime(e.target.checked)}
-                  className="w-4 h-4 rounded border-border"
-                />
-                <Label htmlFor="customTime" className="text-sm font-normal cursor-pointer">
-                  Otra hora
-                </Label>
-                {useCustomTime && (
-                  <Input
-                    type="time"
-                    value={customTime}
-                    onChange={(e) => setCustomTime(e.target.value)}
-                    className="w-28 ml-2"
-                    required={useCustomTime}
-                  />
-                )}
-              </div>
+              <button
+                type="button"
+                onClick={() => setUseCustomTime(!useCustomTime)}
+                className={`flex items-center gap-2 py-2 px-3 rounded-lg border-2 font-medium transition-all w-full justify-center ${
+                  useCustomTime
+                    ? 'border-primary bg-primary/10 text-primary'
+                    : 'border-border hover:border-primary/50 hover:bg-muted/50'
+                }`}
+              >
+                Otra hora
+              </button>
+              {useCustomTime && (
+                <div className="flex items-center justify-center gap-2 p-3 rounded-lg border border-border bg-muted/30">
+                  <select
+                    value={customHour}
+                    onChange={(e) => setCustomHour(e.target.value)}
+                    className="h-10 px-3 rounded-md border border-border bg-background text-foreground text-lg font-medium focus:outline-none focus:ring-2 focus:ring-primary"
+                  >
+                    {PICKER_HOURS.map((h) => (
+                      <option key={h} value={h}>{h}</option>
+                    ))}
+                  </select>
+                  <span className="text-xl font-bold text-muted-foreground">:</span>
+                  <select
+                    value={customMinute}
+                    onChange={(e) => setCustomMinute(e.target.value)}
+                    className="h-10 px-3 rounded-md border border-border bg-background text-foreground text-lg font-medium focus:outline-none focus:ring-2 focus:ring-primary"
+                  >
+                    {PICKER_MINUTES.map((m) => (
+                      <option key={m} value={m}>{m}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
             </div>
 
             {/* Location selection */}
@@ -233,9 +251,13 @@ export default function NuevoPartidoPage() {
                 {isPublic ? <Globe className="w-4 h-4 text-primary" /> : <Lock className="w-4 h-4 text-primary" />}
                 Visibilidad
               </Label>
-              <div className={`flex items-center justify-between p-3 rounded-lg border-2 transition-all ${
-                isPublic ? 'border-primary bg-primary/10' : 'border-border'
-              }`}>
+              <button
+                type="button"
+                onClick={() => setIsPublic(!isPublic)}
+                className={`flex items-center justify-between p-3 rounded-lg border-2 transition-all text-left cursor-pointer ${
+                  isPublic ? 'border-primary bg-primary/10' : 'border-border hover:border-muted-foreground/50'
+                }`}
+              >
                 <div className="flex flex-col gap-0.5">
                   <span className="font-medium text-sm">
                     {isPublic ? 'Publico' : 'Privado'}
@@ -250,8 +272,9 @@ export default function NuevoPartidoPage() {
                   checked={isPublic}
                   onCheckedChange={setIsPublic}
                   aria-label="Toggle visibility"
+                  onClick={(e) => e.stopPropagation()}
                 />
-              </div>
+              </button>
             </div>
 
             {error && (

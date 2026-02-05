@@ -44,7 +44,7 @@ export function DashboardNav({ userName }: DashboardNavProps) {
               const Icon = item.icon
               const isActive = pathname === item.href
               return (
-                <Link key={item.href} href={item.href}>
+                <Link key={item.href} href={item.href} prefetch={true}>
                   <Button
                     variant={isActive ? 'secondary' : 'ghost'}
                     size="sm"
@@ -62,7 +62,7 @@ export function DashboardNav({ userName }: DashboardNavProps) {
           </nav>
 
           <div className="flex items-center gap-2">
-            <Link href="/dashboard/nuevo">
+            <Link href="/dashboard/nuevo" prefetch={true}>
               <Button size="sm" className="gap-2">
                 <Plus className="w-4 h-4" />
                 <span className="hidden sm:inline">Nuevo partido</span>
@@ -90,7 +90,7 @@ export function DashboardNav({ userName }: DashboardNavProps) {
             const Icon = item.icon
             const isActive = pathname === item.href
             return (
-              <Link key={item.href} href={item.href}>
+              <Link key={item.href} href={item.href} prefetch={true}>
                 <Button
                   variant={isActive ? 'secondary' : 'ghost'}
                   size="sm"
