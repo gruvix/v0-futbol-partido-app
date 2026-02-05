@@ -7,7 +7,7 @@ import { Button } from '@/components/ui/button'
 import { logout } from '@/app/actions/auth'
 import { Calendar, Users, Plus, LogOut, Home } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import { FootballLoader } from '@/components/football-loader'
+import { LoadingOverlay } from '@/components/football-loader'
 
 interface DashboardNavProps {
   userName: string
@@ -69,6 +69,7 @@ export function DashboardNav({ userName }: DashboardNavProps) {
               </Button>
             </Link>
             
+            {loggingOut && <LoadingOverlay message="Cerrando sesion..." />}
             <Button 
               variant="ghost" 
               size="sm" 
@@ -77,11 +78,7 @@ export function DashboardNav({ userName }: DashboardNavProps) {
               onClick={handleLogout}
               disabled={loggingOut}
             >
-              {loggingOut ? (
-                <FootballLoader size="sm" />
-              ) : (
-                <LogOut className="w-4 h-4" />
-              )}
+              <LogOut className="w-4 h-4" />
               <span className="sr-only">Salir</span>
             </Button>
           </div>

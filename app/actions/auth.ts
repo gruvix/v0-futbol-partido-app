@@ -16,8 +16,8 @@ export async function register(formData: FormData) {
     return { error: 'Ingresa los ultimos 4 digitos de tu celular' }
   }
 
-  if (password.length < 4) {
-    return { error: 'La contraseña debe tener al menos 4 caracteres' }
+  if (password.length < 8) {
+    return { error: 'La contraseña debe tener al menos 8 caracteres' }
   }
 
   try {

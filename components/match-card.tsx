@@ -33,10 +33,14 @@ export function MatchCard({ match, currentUserId, isPast }: MatchCardProps) {
   const dayNames = ['Dom', 'Lun', 'Mar', 'Mie', 'Jue', 'Vie', 'Sab']
   const monthNames = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic']
 
-  const dayName = dayNames[date.getDay()]
-  const dayNumber = date.getDate()
-  const monthName = monthNames[date.getMonth()]
-  const time = date.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' })
+  // Use UTC methods to avoid timezone offset issues
+  const dayName = dayNames[date.getUTCDay()]
+  const dayNumber = date.getUTCDate()
+  const monthName = monthNames[date.getUTCMonth()]
+  // 24-hour format
+  const hours = date.getUTCHours().toString().padStart(2, '0')
+  const minutes = date.getUTCMinutes().toString().padStart(2, '0')
+  const time = `${hours}:${minutes}`
 
   const location = match.location_type === 'OTRO' && match.location_custom
     ? match.location_custom

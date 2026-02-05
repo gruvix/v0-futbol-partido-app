@@ -11,7 +11,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { getAllUsers, invitePlayer } from '@/app/actions/matches'
-import { FootballLoader } from '@/components/football-loader'
+import { FootballLoader, InlineLoader } from '@/components/football-loader'
 import { Check, UserPlus, Search } from 'lucide-react'
 
 interface User {
@@ -106,7 +106,7 @@ export function InvitePlayersDialog({
         <div className="flex-1 overflow-y-auto min-h-0 -mx-6 px-6">
           {loadingUsers ? (
             <div className="flex items-center justify-center py-8">
-              <FootballLoader size="md" />
+              <InlineLoader />
             </div>
           ) : filteredUsers.length === 0 ? (
             <p className="text-muted-foreground text-sm text-center py-8">
