@@ -66,16 +66,34 @@ export async function initializeDatabase() {
       date_time TIMESTAMP WITH TIME ZONE NOT NULL,
       location_type location_type NOT NULL DEFAULT 'TERRAZAS',
       location_custom VARCHAR(255),
+      field VARCHAR(100),
       is_public BOOLEAN DEFAULT true,
+      team_count INTEGER DEFAULT 0,
+      team_size INTEGER DEFAULT 5,
       created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
     )
   `
   
-  // Add title, emoji, and visibility columns if they don't exist (for existing databases)
+  // Match admins table (players who can configure the match)
+  await sql`
+    CREATE TABLE IF NOT EXISTS match_admins (
+      id SERIAL PRIMARY KEY,
+      match_id INTEGER NOT NULL REFERENCES matches(id) ON DELETE CASCADE,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+      UNIQUE(match_id, user_id)
+    )
+  `
+  
+  // Add columns if they don't exist (for existing databases)
   try {
     await sql`ALTER TABLE matches ADD COLUMN IF NOT EXISTS title VARCHAR(100)`
     await sql`ALTER TABLE matches ADD COLUMN IF NOT EXISTS emoji VARCHAR(10)`
     await sql`ALTER TABLE matches ADD COLUMN IF NOT EXISTS is_public BOOLEAN DEFAULT true`
+    await sql`ALTER TABLE matches ADD COLUMN IF NOT EXISTS team_count INTEGER DEFAULT 0`
+    await sql`ALTER TABLE matches ADD COLUMN IF NOT EXISTS team_size INTEGER DEFAULT 5`
+    await sql`ALTER TABLE matches ADD COLUMN IF NOT EXISTS field VARCHAR(100)`
+    await sql`ALTER TABLE match_participants ADD COLUMN IF NOT EXISTS team_number INTEGER`
   } catch {
     // Columns might already exist
   }
@@ -99,6 +117,8 @@ export async function initializeDatabase() {
   await sql`CREATE INDEX IF NOT EXISTS idx_matches_created_by ON matches(created_by_user_id)`
   await sql`CREATE INDEX IF NOT EXISTS idx_match_participants_match ON match_participants(match_id)`
   await sql`CREATE INDEX IF NOT EXISTS idx_match_participants_user ON match_participants(user_id)`
+  await sql`CREATE INDEX IF NOT EXISTS idx_match_admins_match ON match_admins(match_id)`
+  await sql`CREATE INDEX IF NOT EXISTS idx_match_admins_user ON match_admins(user_id)`
 
   return { success: true }
 }

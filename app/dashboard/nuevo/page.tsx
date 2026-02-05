@@ -35,6 +35,7 @@ export default function NuevoPartidoPage() {
   const [loading, setLoading] = useState(false)
   const [title, setTitle] = useState('')
   const [locationType, setLocationType] = useState('TERRAZAS')
+  const [field, setField] = useState('')
   const [selectedTime, setSelectedTime] = useState('21:00')
   const [customHour, setCustomHour] = useState('21')
   const [customMinute, setCustomMinute] = useState('00')
@@ -74,6 +75,7 @@ export default function NuevoPartidoPage() {
   })
   
   const dayNames = ['Dom', 'Lun', 'Mar', 'Mie', 'Jue', 'Vie', 'Sab']
+  const monthNames = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic']
   
   // Max 4 weeks ahead (approximately 1 month)
   const canGoForward = weekOffset < 4
@@ -91,6 +93,7 @@ export default function NuevoPartidoPage() {
     formData.set('date', selectedDate)
     formData.set('time', useCustomTime ? `${customHour}:${customMinute}` : selectedTime)
     formData.set('locationType', locationType)
+    formData.set('field', field)
     formData.set('isPublic', isPublic.toString())
     formData.set('title', title)
     formData.set('teamCount', actualTeamCount.toString())
@@ -186,6 +189,7 @@ export default function NuevoPartidoPage() {
                       >
                         <span className="text-xs font-medium">{dayNames[date.getDay()]}</span>
                         <span className="text-lg font-bold">{date.getDate()}</span>
+                        <span className="text-[10px] text-muted-foreground">{monthNames[date.getMonth()]}</span>
                       </button>
                     )
                   })}
@@ -274,7 +278,7 @@ export default function NuevoPartidoPage() {
             <div className="flex flex-col gap-3">
               <Label className="flex items-center gap-2">
                 <MapPin className="w-4 h-4 text-primary" />
-                Cancha
+                Ubicacion
               </Label>
               <RadioGroup
                 value={locationType}
@@ -302,7 +306,7 @@ export default function NuevoPartidoPage() {
                 }`}>
                   <RadioGroupItem value="OTRO" id="otro" />
                   <Label htmlFor="otro" className="cursor-pointer flex-1 font-normal">
-                    Otra cancha
+                    Otra ubicacion
                   </Label>
                 </div>
               </RadioGroup>
@@ -310,7 +314,7 @@ export default function NuevoPartidoPage() {
 
             {locationType === 'OTRO' && (
               <div className="flex flex-col gap-2">
-                <Label htmlFor="locationCustom">Nombre de la cancha</Label>
+                <Label htmlFor="locationCustom">Nombre de la ubicacion</Label>
                 <Input
                   id="locationCustom"
                   name="locationCustom"
@@ -320,6 +324,20 @@ export default function NuevoPartidoPage() {
                 />
               </div>
             )}
+
+            {/* Field selection */}
+            <div className="flex flex-col gap-3">
+              <Label className="flex items-center gap-2">
+                <MapPin className="w-4 h-4 text-primary" />
+                Cancha (opcional)
+              </Label>
+              <Input
+                value={field}
+                onChange={(e) => setField(e.target.value)}
+                placeholder="Ej: Cancha 1, Cancha B"
+                maxLength={100}
+              />
+            </div>
 
             {/* Team configuration */}
             <div className="flex flex-col gap-3">
