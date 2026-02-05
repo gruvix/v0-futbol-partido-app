@@ -40,6 +40,7 @@ interface Match {
   location_custom: string | null
   created_by_user_id: number
   creator_name: string
+  title: string | null
 }
 
 interface Participant {
@@ -85,6 +86,7 @@ export function MatchDetailClient({
   const [showInviteDialog, setShowInviteDialog] = useState(false)
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
   const [showLastPlayerConfirm, setShowLastPlayerConfirm] = useState(false)
+  const [showLeaveConfirm, setShowLeaveConfirm] = useState(false)
   const router = useRouter()
   const { showLoader, hideLoader } = useActionLoader()
 
@@ -121,7 +123,12 @@ export function MatchDetailClient({
     setLoading(null)
   }
 
-  async function handleLeave() {
+  function handleLeaveClick() {
+    setShowLeaveConfirm(true)
+  }
+
+  async function handleLeaveConfirm() {
+    setShowLeaveConfirm(false)
     setLoading('leave')
     setError('')
     showLoader('Abandonando partido...')
@@ -167,6 +174,9 @@ export function MatchDetailClient({
     const result = await assignTeam(match.id, participantId, team)
     if (result?.error) {
       setError(result.error)
+    } else {
+      // Refresh the page to update the UI
+      router.refresh()
     }
   }
 
@@ -181,12 +191,15 @@ export function MatchDetailClient({
 
       <Card>
         <CardHeader className="pb-4">
-          <div className="flex items-start justify-between">
+          <div className="flex items-start justify-between gap-4">
             <div>
-              <CardTitle className="text-xl text-foreground flex items-center gap-2">
-                <Calendar className="w-5 h-5 text-primary" />
-                {formattedDate}
+              <CardTitle className="text-xl text-foreground">
+                {match.title || `Partido de ${match.creator_name}`}
               </CardTitle>
+              <div className="flex items-center gap-2 mt-2 text-foreground">
+                <Calendar className="w-4 h-4 text-primary" />
+                {formattedDate}
+              </div>
               <div className="flex items-center gap-4 mt-2 text-muted-foreground">
                 <span className="flex items-center gap-1">
                   <Clock className="w-4 h-4" />
@@ -201,91 +214,78 @@ export function MatchDetailClient({
                 Organiza: {match.creator_name}
               </p>
             </div>
-            {isPast && <Badge variant="secondary">Finalizado</Badge>}
+            <div className="flex items-center gap-2">
+              {isPast && <Badge variant="secondary">Finalizado</Badge>}
+              {!isPast && userParticipation && (
+                <Button
+                  variant="destructive"
+                  size="sm"
+                  onClick={handleLeaveClick}
+                  disabled={isLoading}
+                  className="gap-2"
+                >
+                  {loading === 'leave' ? (
+                    <FootballLoader size="sm" />
+                  ) : (
+                    <UserMinus className="w-4 h-4" />
+                  )}
+                  Abandonar
+                </Button>
+              )}
+            </div>
           </div>
         </CardHeader>
 
         <CardContent className="flex flex-col gap-6">
-          {/* Join/Leave buttons */}
-          {!isPast && (
+          {/* Join buttons (when not participating) */}
+          {!isPast && !userParticipation && (
             <div className="flex flex-col gap-2">
               {error && (
                 <p className="text-sm text-destructive">{error}</p>
               )}
               
-              {userParticipation ? (
-                <div className="flex items-center gap-2 flex-wrap">
-                  <Badge variant="outline" className="text-sm">
-                    {roleLabels[userParticipation.role]}
-                  </Badge>
-                  <Button
-                    variant="destructive"
-                    size="sm"
-                    onClick={handleLeave}
-                    disabled={isLoading}
-                    className="gap-2"
-                  >
-                    {loading === 'leave' ? (
-                      <FootballLoader size="sm" />
-                    ) : (
-                      <UserMinus className="w-4 h-4" />
-                    )}
-                    Abandonar
-                  </Button>
-                  {userParticipation.role !== 'PLAYER' && (
-                    <Button
-                      variant="secondary"
-                      size="sm"
-                      onClick={() => handleJoin('PLAYER')}
-                      disabled={isLoading}
-                    >
-                      {loading === 'join-PLAYER' ? (
-                        <FootballLoader size="sm" />
-                      ) : (
-                        'Cambiar a Jugador'
-                      )}
-                    </Button>
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  onClick={() => handleJoin('PLAYER')}
+                  disabled={isLoading}
+                  className="gap-2"
+                >
+                  {loading === 'join-PLAYER' ? (
+                    <FootballLoader size="sm" />
+                  ) : (
+                    <UserPlus className="w-4 h-4" />
                   )}
-                </div>
-              ) : (
-                <div className="flex flex-wrap gap-2">
-                  <Button
-                    onClick={() => handleJoin('PLAYER')}
-                    disabled={isLoading}
-                    className="gap-2"
-                  >
-                    {loading === 'join-PLAYER' ? (
-                      <FootballLoader size="sm" />
-                    ) : (
-                      <UserPlus className="w-4 h-4" />
-                    )}
-                    Anotarme
-                  </Button>
-                  <Button
-                    variant="secondary"
-                    onClick={() => handleJoin('SUBSTITUTE')}
-                    disabled={isLoading}
-                  >
-                    {loading === 'join-SUBSTITUTE' ? (
-                      <FootballLoader size="sm" />
-                    ) : (
-                      'Como suplente'
-                    )}
-                  </Button>
-                  <Button
-                    variant="outline"
-                    onClick={() => handleJoin('EXTRA')}
-                    disabled={isLoading}
-                  >
-                    {loading === 'join-EXTRA' ? (
-                      <FootballLoader size="sm" />
-                    ) : (
-                      'Por las dudas'
-                    )}
-                  </Button>
-                </div>
-              )}
+                  Anotarme
+                </Button>
+                <Button
+                  variant="secondary"
+                  onClick={() => handleJoin('SUBSTITUTE')}
+                  disabled={isLoading}
+                >
+                  {loading === 'join-SUBSTITUTE' ? (
+                    <FootballLoader size="sm" />
+                  ) : (
+                    'Como suplente'
+                  )}
+                </Button>
+                <Button
+                  variant="outline"
+                  onClick={() => handleJoin('EXTRA')}
+                  disabled={isLoading}
+                >
+                  {loading === 'join-EXTRA' ? (
+                    <FootballLoader size="sm" />
+                  ) : (
+                    'Por las dudas'
+                  )}
+                </Button>
+              </div>
             </div>
+          )}
+          
+          {/* Error display for participants */}
+          {!isPast && userParticipation && error && (
+            <p className="text-sm text-destructive">{error}</p>
           )}
 
           {/* Participants */}
@@ -334,33 +334,33 @@ export function MatchDetailClient({
                 isPast={isPast}
                 onAssignTeam={handleAssignTeam}
                 title="Jugadores"
+                showTeamColumns={true}
+                showPhoneNumbers={true}
               />
             )}
 
             {substitutes.length > 0 && (
-              <div className="flex flex-col gap-2">
-                <h4 className="text-sm font-medium text-muted-foreground">Suplentes</h4>
-                <div className="flex flex-wrap gap-2">
-                  {substitutes.map((p) => (
-                    <Badge key={p.id} variant="secondary" className="py-1.5 px-3">
-                      {p.name} ({p.phone_last_four})
-                    </Badge>
-                  ))}
-                </div>
-              </div>
+              <TeamAssignment
+                participants={substitutes}
+                isCreator={isCreator}
+                isPast={isPast}
+                onAssignTeam={handleAssignTeam}
+                title="Suplentes"
+                showTeamColumns={false}
+                showPhoneNumbers={true}
+              />
             )}
 
             {extras.length > 0 && (
-              <div className="flex flex-col gap-2">
-                <h4 className="text-sm font-medium text-muted-foreground">Por las dudas</h4>
-                <div className="flex flex-wrap gap-2">
-                  {extras.map((p) => (
-                    <Badge key={p.id} variant="outline" className="py-1.5 px-3">
-                      {p.name} ({p.phone_last_four})
-                    </Badge>
-                  ))}
-                </div>
-              </div>
+              <TeamAssignment
+                participants={extras}
+                isCreator={isCreator}
+                isPast={isPast}
+                onAssignTeam={handleAssignTeam}
+                title="Por las dudas"
+                showTeamColumns={false}
+                showPhoneNumbers={true}
+              />
             )}
 
             {participants.length === 0 && (
@@ -429,6 +429,24 @@ export function MatchDetailClient({
             <AlertDialogCancel>Dejar el partido</AlertDialogCancel>
             <AlertDialogAction onClick={handleDelete} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
               Eliminar partido
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Leave Confirmation Dialog */}
+      <AlertDialog open={showLeaveConfirm} onOpenChange={setShowLeaveConfirm}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Abandonar partido</AlertDialogTitle>
+            <AlertDialogDescription>
+              Seguro que queres salir de este partido?
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogAction onClick={handleLeaveConfirm} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+              Abandonar
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

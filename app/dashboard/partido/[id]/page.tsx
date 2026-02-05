@@ -10,6 +10,7 @@ interface Match {
   location_custom: string | null
   created_by_user_id: number
   creator_name: string
+  title: string | null
 }
 
 interface Participant {
@@ -29,6 +30,7 @@ async function getMatch(id: number): Promise<Match | null> {
       m.location_type,
       m.location_custom,
       m.created_by_user_id,
+      m.title,
       u.name as creator_name
     FROM matches m
     JOIN users u ON m.created_by_user_id = u.id

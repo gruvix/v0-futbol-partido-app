@@ -4,8 +4,14 @@ import { useState } from 'react'
 import Link from 'next/link'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
-import { ChevronLeft, ChevronRight, MapPin, Users } from 'lucide-react'
+import { ChevronLeft, ChevronRight, MapPin, Clock, X } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
 
 interface MatchSummary {
   id: number
@@ -13,6 +19,8 @@ interface MatchSummary {
   location_type: string
   location_custom: string | null
   participant_count: number
+  title: string | null
+  creator_name: string
 }
 
 interface CalendarViewProps {
@@ -36,6 +44,8 @@ export function CalendarView({ matches }: CalendarViewProps) {
   const today = new Date()
   const [currentMonth, setCurrentMonth] = useState(today.getMonth())
   const [currentYear, setCurrentYear] = useState(today.getFullYear())
+  const [selectedDay, setSelectedDay] = useState<number | null>(null)
+  const [showDayModal, setShowDayModal] = useState(false)
 
   const firstDayOfMonth = new Date(currentYear, currentMonth, 1)
   const lastDayOfMonth = new Date(currentYear, currentMonth + 1, 0)
@@ -135,13 +145,21 @@ export function CalendarView({ matches }: CalendarViewProps) {
             const hasMatches = dayMatches.length > 0
 
             return (
-              <div
+              <button
                 key={day}
+                type="button"
+                onClick={() => {
+                  if (hasMatches) {
+                    setSelectedDay(day)
+                    setShowDayModal(true)
+                  }
+                }}
                 className={cn(
                   'aspect-square p-1 rounded-lg transition-colors relative',
                   isToday(day) && 'bg-primary/10 ring-2 ring-primary',
                   isPast(day) && 'opacity-50',
-                  hasMatches && !isPast(day) && 'bg-accent/20'
+                  hasMatches && !isPast(day) && 'bg-accent/20 hover:bg-accent/40 cursor-pointer',
+                  hasMatches && 'hover:ring-2 hover:ring-primary/50'
                 )}
               >
                 <span
@@ -162,7 +180,7 @@ export function CalendarView({ matches }: CalendarViewProps) {
                     ))}
                   </div>
                 )}
-              </div>
+              </button>
             )
           })}
         </div>
@@ -212,6 +230,55 @@ export function CalendarView({ matches }: CalendarViewProps) {
             </div>
           )}
         </div>
+
+        {/* Day matches modal */}
+        <Dialog open={showDayModal} onOpenChange={setShowDayModal}>
+          <DialogContent className="max-w-md">
+            <DialogHeader>
+              <DialogTitle>
+                {selectedDay && `${selectedDay} de ${monthNames[currentMonth]}`}
+              </DialogTitle>
+            </DialogHeader>
+            <div className="flex flex-col gap-2">
+              {selectedDay && getMatchesForDay(selectedDay).map(match => {
+                const date = new Date(match.date_time)
+                const hours = date.getUTCHours().toString().padStart(2, '0')
+                const mins = date.getUTCMinutes().toString().padStart(2, '0')
+                const location = match.location_type === 'OTRO' && match.location_custom
+                  ? match.location_custom
+                  : locationLabels[match.location_type]
+                
+                return (
+                  <Link
+                    key={match.id}
+                    href={`/dashboard/partido/${match.id}`}
+                    onClick={() => setShowDayModal(false)}
+                    className="flex flex-col gap-1 p-3 rounded-lg border border-border hover:bg-muted/50 transition-colors"
+                  >
+                    <span className="font-medium text-foreground">
+                      {match.title || `Partido de ${match.creator_name}`}
+                    </span>
+                    <div className="flex items-center gap-4 text-sm text-muted-foreground">
+                      <span className="flex items-center gap-1">
+                        <Clock className="w-3 h-3" />
+                        {hours}:{mins} hs
+                      </span>
+                      <span className="flex items-center gap-1">
+                        <MapPin className="w-3 h-3" />
+                        {location}
+                      </span>
+                    </div>
+                  </Link>
+                )
+              })}
+              {selectedDay && getMatchesForDay(selectedDay).length === 0 && (
+                <p className="text-muted-foreground text-sm text-center py-4">
+                  No hay partidos este dia
+                </p>
+              )}
+            </div>
+          </DialogContent>
+        </Dialog>
       </CardContent>
     </Card>
   )
