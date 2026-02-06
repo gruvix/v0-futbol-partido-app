@@ -227,6 +227,39 @@ export function MatchDetailClient({
   // - when no teams, it is chosen by creator/admin (match.max_players)
   const maxPlayers = match.team_count > 0 ? computedMaxPlayers(match.team_count, match.team_size) : match.max_players
 
+  const [pendingTeamSettings, setPendingTeamSettings] = useState<{
+    teamCount: number
+    teamSize: number
+    maxPlayers: number
+  } | null>(null)
+
+  async function applyTeamSettings(teamCount: number, teamSize: number, maxPlayersValue: number): Promise<void> {
+    const normalize = await resetTeamsToNoTeam(match.id)
+    if (normalize?.error) {
+      showError('Error al intentar actualizar configuracion del partido', normalize.error)
+      return
+    }
+
+    const r1 = await updateMatchField(match.id, 'team_count', teamCount)
+    if (r1?.error) {
+      showError('Error al intentar actualizar configuracion del partido', r1.error)
+      return
+    }
+
+    const r2 = await updateMatchField(match.id, 'team_size', teamSize)
+    if (r2?.error) {
+      showError('Error al intentar actualizar configuracion del partido', r2.error)
+      return
+    }
+
+    if (teamCount === 0) {
+      const r3 = await updateMatchField(match.id, 'max_players', maxPlayersValue)
+      if (r3?.error) {
+        showError('Error al intentar actualizar configuracion del partido', r3.error)
+      }
+    }
+  }
+
   async function saveTeamSettings(nextTeamCount: number, nextTeamSize: number, nextMaxPlayers: number): Promise<void> {
     const hasAnyPlayers = players.length > 0
 
@@ -245,49 +278,11 @@ export function MatchDetailClient({
     }
 
     showLoader('Guardando...')
-
-    // Always normalize participants to "no team" whenever team mode changes
-    // (prevents stale team values from breaking TeamAssignment when toggling modes)
-    const normalize = await resetTeamsToNoTeam(match.id)
-    if (normalize?.error) {
-      hideLoader()
-      showError('Error al intentar actualizar configuracion del partido', normalize.error)
-      return
-    }
-
-    const r1 = await updateMatchField(match.id, 'team_count', nextTeamCount)
-    if (r1?.error) {
-      hideLoader()
-      showError('Error al intentar actualizar configuracion del partido', r1.error)
-      return
-    }
-
-    const r2 = await updateMatchField(match.id, 'team_size', nextTeamSize)
-    if (r2?.error) {
-      hideLoader()
-      showError('Error al intentar actualizar configuracion del partido', r2.error)
-      return
-    }
-
-    if (nextTeamCount === 0) {
-      const r3 = await updateMatchField(match.id, 'max_players', nextMaxPlayers)
-      if (r3?.error) {
-        hideLoader()
-        showError('Error al intentar actualizar configuracion del partido', r3.error)
-        return
-      }
-    }
-
+    await applyTeamSettings(nextTeamCount, nextTeamSize, nextMaxPlayers)
     hideLoader()
     // Force refresh so UI immediately reflects new mode (teams vs no teams)
     router.refresh()
   }
-
-  const [pendingTeamSettings, setPendingTeamSettings] = useState<{
-    teamCount: number
-    teamSize: number
-    maxPlayers: number
-  } | null>(null)
 
   // Generate edit dates
   const editDates = Array.from({ length: 7 }, (_, i) => {
@@ -477,7 +472,7 @@ export function MatchDetailClient({
     }
 
     if (pendingTeamSettings) {
-      await saveTeamSettings(pendingTeamSettings.teamCount, pendingTeamSettings.teamSize, pendingTeamSettings.maxPlayers)
+      await applyTeamSettings(pendingTeamSettings.teamCount, pendingTeamSettings.teamSize, pendingTeamSettings.maxPlayers)
       setPendingTeamSettings(null)
     } else {
       await updateMatchField(match.id, showTeamResetWarning.field, showTeamResetWarning.value)
