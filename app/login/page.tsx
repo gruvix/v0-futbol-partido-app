@@ -10,16 +10,17 @@ import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { login } from '@/app/actions/auth'
 import { LoadingOverlay } from '@/components/football-loader'
+import { useErrorToast } from '@/components/error-toast-provider'
 
 const STORAGE_KEY_NAME = 'fulbito_login_name'
 const STORAGE_KEY_PHONE = 'fulbito_login_phone'
 
 export default function LoginPage() {
-  const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
   const [name, setName] = useState('')
   const [phoneLast4, setPhoneLast4] = useState('')
   const router = useRouter()
+  const { showError } = useErrorToast()
   
   const nameInputRef = useRef<HTMLInputElement>(null)
   const phoneInputRef = useRef<HTMLInputElement>(null)
@@ -59,14 +60,13 @@ export default function LoginPage() {
 
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault()
-    setError('')
     setLoading(true)
 
     const formData = new FormData(e.currentTarget)
     const result = await login(formData)
 
     if (result?.error) {
-      setError(result.error)
+      showError('Error al iniciar sesion', result.error)
       setLoading(false)
     } else if (result?.redirect) {
       router.push(result.redirect)
@@ -143,9 +143,7 @@ export default function LoginPage() {
               />
             </div>
 
-            {error && (
-              <p className="text-sm text-destructive text-center">{error}</p>
-            )}
+            {/* errors are shown via ErrorToastProvider */}
 
             <Button type="submit" className="w-full" disabled={loading}>
               Entrar

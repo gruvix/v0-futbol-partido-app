@@ -14,6 +14,7 @@ import { ArrowLeft, Calendar, Clock, MapPin, Globe, Lock, Users, Pencil, Chevron
 import { Switch } from '@/components/ui/switch'
 import Link from 'next/link'
 import { useActionLoader } from '@/components/football-loader'
+import { useErrorToast } from '@/components/error-toast-provider'
 
 const COMMON_TIMES = [
   { label: '16:00', value: '16:00' },
@@ -31,7 +32,6 @@ const PICKER_HOURS = Array.from({ length: 24 }, (_, i) => i.toString().padStart(
 const PICKER_MINUTES = ['00', '15', '30', '45']
 
 export default function NuevoPartidoPage() {
-  const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
   const [title, setTitle] = useState('')
   const [locationType, setLocationType] = useState('TERRAZAS')
@@ -55,6 +55,7 @@ export default function NuevoPartidoPage() {
   const [weekOffset, setWeekOffset] = useState(0) // 0 = this week, 1 = next week, etc.
   const router = useRouter()
   const { showLoader, hideLoader } = useActionLoader()
+  const { showError } = useErrorToast()
 
   // Fetch current user's name for placeholder
   useEffect(() => {
@@ -85,12 +86,17 @@ export default function NuevoPartidoPage() {
   const canGoForward = weekOffset < 4
   const canGoBack = weekOffset > 0
 
+  function computedMaxPlayers(teamCountValue: number, teamSizeValue: number): number {
+    return Math.max(1, teamCountValue) * Math.max(1, teamSizeValue)
+  }
+
   // Calculate actual team count
   const actualTeamCount = useCustomTeamCount && customTeamCount ? parseInt(customTeamCount) : teamCount
+  const finalTeamSize = useCustomTeamSize && customTeamSize ? parseInt(customTeamSize) : teamSize
+  const derivedMaxPlayers = actualTeamCount > 0 ? computedMaxPlayers(actualTeamCount, finalTeamSize) : null
 
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault()
-    setError('')
     setLoading(true)
 
     const formData = new FormData()
@@ -101,9 +107,10 @@ export default function NuevoPartidoPage() {
     formData.set('isPublic', isPublic.toString())
     formData.set('title', title)
     formData.set('teamCount', actualTeamCount.toString())
-    const finalTeamSize = useCustomTeamSize && customTeamSize ? parseInt(customTeamSize) : teamSize
     formData.set('teamSize', finalTeamSize.toString())
-    const finalMaxPlayers = useCustomMaxPlayers && customMaxPlayers ? parseInt(customMaxPlayers) : maxPlayers
+    const finalMaxPlayers = actualTeamCount > 0
+      ? computedMaxPlayers(actualTeamCount, finalTeamSize)
+      : (useCustomMaxPlayers && customMaxPlayers ? parseInt(customMaxPlayers) : maxPlayers)
     formData.set('maxPlayers', finalMaxPlayers.toString())
     if (invitesPerPlayer !== null) {
       formData.set('invitesPerPlayer', invitesPerPlayer.toString())
@@ -112,20 +119,21 @@ export default function NuevoPartidoPage() {
     if (locationType === 'OTRO') {
       const customLocation = (e.currentTarget.elements.namedItem('locationCustom') as HTMLInputElement)?.value
       if (!customLocation) {
-        setError('Ingresa el nombre de la cancha')
+        showError('Faltan datos', 'Ingresa el nombre de la cancha')
         setLoading(false)
         return
       }
       formData.set('locationCustom', customLocation)
     }
     
+    // Keep loader visible through the navigation to the new match page
     showLoader('Creando partido...')
     const result = await createMatch(formData)
-    hideLoader()
 
     if (result?.error) {
-      setError(result.error)
+      showError('Error al crear el partido', result.error)
       setLoading(false)
+      hideLoader()
     } else if (result?.redirect) {
       router.push(result.redirect)
     }
@@ -473,46 +481,55 @@ export default function NuevoPartidoPage() {
                 <Users className="w-4 h-4 text-primary" />
                 Maximo de jugadores
               </Label>
-              <div className="grid grid-cols-4 gap-2">
-                {[10, 14, 20].map((n) => (
-                  <button
-                    key={n}
-                    type="button"
-                    onClick={() => {
-                      setMaxPlayers(n)
-                      setUseCustomMaxPlayers(false)
-                    }}
-                    className={`py-2 px-3 rounded-lg border-2 font-medium transition-all ${
-                      !useCustomMaxPlayers && maxPlayers === n
-                        ? 'border-primary bg-primary/10 text-primary'
-                        : 'border-border hover:border-primary/50 hover:bg-muted/50'
-                    }`}
-                  >
-                    {n}
-                  </button>
-                ))}
-                <button
-                  type="button"
-                  onClick={() => setUseCustomMaxPlayers(true)}
-                  className={`py-2 px-3 rounded-lg border-2 font-medium transition-all ${
-                    useCustomMaxPlayers
-                      ? 'border-primary bg-primary/10 text-primary'
-                      : 'border-border hover:border-primary/50 hover:bg-muted/50'
-                  }`}
-                >
-                  Otro
-                </button>
-              </div>
-              {useCustomMaxPlayers && (
-                <Input
-                  type="number"
-                  min="2"
-                  max="100"
-                  value={customMaxPlayers}
-                  onChange={(e) => setCustomMaxPlayers(e.target.value)}
-                  placeholder="Maximo de jugadores"
-                  className="mt-1"
-                />
+
+              {derivedMaxPlayers !== null ? (
+                <div className="p-3 rounded-lg border border-border bg-muted/30 text-sm text-muted-foreground">
+                  Se calcula automaticamente segun equipos: <span className="font-semibold text-foreground">{derivedMaxPlayers}</span>
+                </div>
+              ) : (
+                <>
+                  <div className="grid grid-cols-3 gap-2">
+                    {[10, 20].map((n) => (
+                      <button
+                        key={n}
+                        type="button"
+                        onClick={() => {
+                          setMaxPlayers(n)
+                          setUseCustomMaxPlayers(false)
+                        }}
+                        className={`py-2 px-3 rounded-lg border-2 font-medium transition-all ${
+                          !useCustomMaxPlayers && maxPlayers === n
+                            ? 'border-primary bg-primary/10 text-primary'
+                            : 'border-border hover:border-primary/50 hover:bg-muted/50'
+                        }`}
+                      >
+                        {n}
+                      </button>
+                    ))}
+                    <button
+                      type="button"
+                      onClick={() => setUseCustomMaxPlayers(true)}
+                      className={`py-2 px-3 rounded-lg border-2 font-medium transition-all ${
+                        useCustomMaxPlayers
+                          ? 'border-primary bg-primary/10 text-primary'
+                          : 'border-border hover:border-primary/50 hover:bg-muted/50'
+                      }`}
+                    >
+                      Otro
+                    </button>
+                  </div>
+                  {useCustomMaxPlayers && (
+                    <Input
+                      type="number"
+                      min="2"
+                      max="100"
+                      value={customMaxPlayers}
+                      onChange={(e) => setCustomMaxPlayers(e.target.value)}
+                      placeholder="Maximo de jugadores"
+                      className="mt-1"
+                    />
+                  )}
+                </>
               )}
             </div>
 
@@ -591,9 +608,7 @@ export default function NuevoPartidoPage() {
               </div>
             </div>
 
-            {error && (
-              <p className="text-sm text-destructive text-center">{error}</p>
-            )}
+            {/* errors are shown via ErrorToastProvider */}
 
             <Button type="submit" className="w-full h-12 text-base" disabled={loading}>
               Crear partido
