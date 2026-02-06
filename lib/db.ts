@@ -1,6 +1,17 @@
 import { neon } from '@neondatabase/serverless'
 
-export const sql = neon(process.env.DATABASE_URL!)
+function getDatabaseUrl(): string {
+  const url = process.env.DATABASE_URL
+  if (!url) {
+    // Throw a more actionable error than the default one (and avoid non-null assertion).
+    throw new Error(
+      "Missing DATABASE_URL env var. Create a .env.local with DATABASE_URL='postgres://...' (Neon connection string)"
+    )
+  }
+  return url
+}
+
+export const sql = neon(getDatabaseUrl())
 
 export async function initializeDatabase() {
   // Create enum types (ignore if already exists)

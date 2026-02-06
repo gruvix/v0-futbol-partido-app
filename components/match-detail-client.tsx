@@ -27,22 +27,23 @@ import {
   ChevronRight,
   Pencil
 } from 'lucide-react'
-import { 
-  joinMatch, 
-  leaveMatch, 
-  deleteMatch, 
-  randomizeTeams, 
+import {
+  joinMatch,
+  leaveMatch,
+  deleteMatch,
+  randomizeTeams,
   assignTeam,
   updateMatchField,
-  resetTeamsToSubstitutes,
+  resetTeamsToNoTeam,
   addMatchAdmin,
   removeMatchAdmin,
-  changeParticipantRole
+  changeParticipantRole,
 } from '@/app/actions/matches'
 import { TeamAssignment } from '@/components/team-assignment'
 import { InvitePlayersDialog } from '@/components/invite-players-dialog'
-import { FootballLoader, useActionLoader } from '@/components/football-loader'
+import { InlineLoader, useActionLoader } from '@/components/football-loader'
 import { EditableField } from '@/components/editable-field'
+import { useErrorToast } from '@/components/error-toast-provider'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -121,7 +122,7 @@ export function MatchDetailClient({
   currentUserId,
 }: MatchDetailClientProps) {
   const [loading, setLoading] = useState<string | null>(null)
-  const [error, setError] = useState('')
+  const [_error, setError] = useState('')
   const [showInviteDialog, setShowInviteDialog] = useState(false)
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
   const [showLastPlayerConfirm, setShowLastPlayerConfirm] = useState(false)
@@ -130,6 +131,25 @@ export function MatchDetailClient({
   const [showAdminConfirm, setShowAdminConfirm] = useState<{userId: number, isCurrentlyAdmin: boolean} | null>(null)
   const router = useRouter()
   const { showLoader, hideLoader } = useActionLoader()
+  const { showError } = useErrorToast()
+
+  function computedMaxPlayersValue(teamCount: number, teamSize: number): number {
+    return Math.max(1, teamCount) * Math.max(1, teamSize)
+  }
+
+  async function handleFieldSave(field: string, value: string | number | boolean | null): Promise<void> {
+    showLoader('Guardando...')
+    const result = await updateMatchField(match.id, field, value)
+    hideLoader()
+    if (result?.error) {
+      showError('Error al intentar actualizar configuracion del partido')
+    }
+  }
+
+  function computedMaxPlayers(teamCount: number, teamSize: number): number {
+    if (teamCount <= 0) return match.max_players
+    return Math.max(1, teamCount) * Math.max(1, teamSize)
+  }
 
   // Edit state for each field
   const [editTitle, setEditTitle] = useState(match.title || '')
@@ -202,8 +222,72 @@ export function MatchDetailClient({
   const substitutes = effectiveParticipants.filter(p => p.role === 'SUBSTITUTE')
   const extras = effectiveParticipants.filter(p => p.role === 'EXTRA')
 
-  // Calculate max players: use match.max_players which is always set
-  const maxPlayers = match.max_players
+  // Max players:
+  // - when teams are enabled, it is derived (team_count * team_size)
+  // - when no teams, it is chosen by creator/admin (match.max_players)
+  const maxPlayers = match.team_count > 0 ? computedMaxPlayers(match.team_count, match.team_size) : match.max_players
+
+  async function saveTeamSettings(nextTeamCount: number, nextTeamSize: number, nextMaxPlayers: number): Promise<void> {
+    const hasAnyPlayers = players.length > 0
+
+    // Ensure we save with the latest selected values (EditableField can keep stale edit state)
+    setEditTeamCount(nextTeamCount)
+    setEditTeamSize(nextTeamSize)
+    if (nextTeamCount === 0) {
+      setEditMaxPlayers(nextMaxPlayers.toString())
+    }
+
+    // If players are present, confirm first
+    if (hasAnyPlayers) {
+      setShowTeamResetWarning({ field: 'team_count', value: nextTeamCount })
+      setPendingTeamSettings({ teamCount: nextTeamCount, teamSize: nextTeamSize, maxPlayers: nextMaxPlayers })
+      return
+    }
+
+    showLoader('Guardando...')
+
+    // Always normalize participants to "no team" whenever team mode changes
+    // (prevents stale team values from breaking TeamAssignment when toggling modes)
+    const normalize = await resetTeamsToNoTeam(match.id)
+    if (normalize?.error) {
+      hideLoader()
+      showError('Error al intentar actualizar configuracion del partido', normalize.error)
+      return
+    }
+
+    const r1 = await updateMatchField(match.id, 'team_count', nextTeamCount)
+    if (r1?.error) {
+      hideLoader()
+      showError('Error al intentar actualizar configuracion del partido', r1.error)
+      return
+    }
+
+    const r2 = await updateMatchField(match.id, 'team_size', nextTeamSize)
+    if (r2?.error) {
+      hideLoader()
+      showError('Error al intentar actualizar configuracion del partido', r2.error)
+      return
+    }
+
+    if (nextTeamCount === 0) {
+      const r3 = await updateMatchField(match.id, 'max_players', nextMaxPlayers)
+      if (r3?.error) {
+        hideLoader()
+        showError('Error al intentar actualizar configuracion del partido', r3.error)
+        return
+      }
+    }
+
+    hideLoader()
+    // Force refresh so UI immediately reflects new mode (teams vs no teams)
+    router.refresh()
+  }
+
+  const [pendingTeamSettings, setPendingTeamSettings] = useState<{
+    teamCount: number
+    teamSize: number
+    maxPlayers: number
+  } | null>(null)
 
   // Generate edit dates
   const editDates = Array.from({ length: 7 }, (_, i) => {
@@ -216,13 +300,12 @@ export function MatchDetailClient({
 
   async function handleJoin(role: 'PLAYER' | 'SUBSTITUTE' | 'EXTRA') {
     setLoading(`join-${role}`)
-    setError('')
     const roleLabels: Record<string, string> = { PLAYER: 'Jugador', SUBSTITUTE: 'Suplente', EXTRA: 'Por las dudas' }
     showLoader(`Anotandote como ${roleLabels[role]}...`)
     const result = await joinMatch(match.id, role)
     hideLoader()
     if (result?.error) {
-      setError(result.error)
+      showError('Error al intentar anotarte', result.error)
     }
     setLoading(null)
   }
@@ -234,12 +317,11 @@ export function MatchDetailClient({
   async function handleLeaveConfirmed() {
     setShowLeaveConfirm(false)
     setLoading('leave')
-    setError('')
     showLoader('Abandonando partido...')
     const result = await leaveMatch(match.id)
     hideLoader()
     if (result?.error) {
-      setError(result.error)
+      showError('Error al intentar abandonar el partido', result.error)
       setLoading(null)
     } else if (result?.isLastPlayer) {
       setLoading(null)
@@ -253,10 +335,10 @@ export function MatchDetailClient({
     setLoading('delete')
     showLoader('Eliminando partido...')
     const result = await deleteMatch(match.id)
-    hideLoader()
     if (result?.error) {
-      setError(result.error)
+      showError('Error al intentar eliminar partido', result.error)
       setLoading(null)
+      hideLoader()
     } else if (result?.redirect) {
       router.push(result.redirect)
     }
@@ -264,12 +346,11 @@ export function MatchDetailClient({
 
   async function handleRandomize() {
     setLoading('randomize')
-    setError('')
     showLoader('Sorteando equipos...')
     const result = await randomizeTeams(match.id)
     hideLoader()
     if (result?.error) {
-      setError(result.error)
+      showError('Error al intentar sortear equipos', result.error)
     }
     setLoading(null)
   }
@@ -299,7 +380,7 @@ export function MatchDetailClient({
         delete next[participantId]
         return next
       })
-      setError(result.error)
+      showError('Error al intentar mover jugador a equipo', result.error)
     }
     // On success, keep the override - it will be consistent with the revalidated data
     // and will be cleaned up when participants prop changes
@@ -324,7 +405,7 @@ export function MatchDetailClient({
         delete next[participantId]
         return next
       })
-      setError(result.error)
+      showError('Error al intentar mover jugador a jugadores', result.error)
     }
   }
 
@@ -347,7 +428,7 @@ export function MatchDetailClient({
         delete next[participantId]
         return next
       })
-      setError(result.error)
+      showError('Error al intentar mover jugador a suplentes', result.error)
     }
   }
 
@@ -362,12 +443,12 @@ export function MatchDetailClient({
     if (isCurrentlyAdmin) {
       const result = await removeMatchAdmin(match.id, userId)
       if (result?.error) {
-        setError(result.error)
+        showError('Error al intentar quitar administrador', result.error)
       }
     } else {
       const result = await addMatchAdmin(match.id, userId)
       if (result?.error) {
-        setError(result.error)
+        showError('Error al intentar agregar administrador', result.error)
       }
     }
   }
@@ -383,9 +464,27 @@ export function MatchDetailClient({
 
   async function confirmTeamReset() {
     if (!showTeamResetWarning) return
-    await resetTeamsToSubstitutes(match.id)
-    await updateMatchField(match.id, showTeamResetWarning.field, showTeamResetWarning.value)
+    showLoader('Guardando...')
+
+    // New behavior: keep everyone as PLAYER/SUBSTITUTE but clear team assignments.
+    const normalize = await resetTeamsToNoTeam(match.id)
+    if (normalize?.error) {
+      hideLoader()
+      showError('Error al intentar actualizar configuracion del partido', normalize.error)
+      setShowTeamResetWarning(null)
+      setPendingTeamSettings(null)
+      return
+    }
+
+    if (pendingTeamSettings) {
+      await saveTeamSettings(pendingTeamSettings.teamCount, pendingTeamSettings.teamSize, pendingTeamSettings.maxPlayers)
+      setPendingTeamSettings(null)
+    } else {
+      await updateMatchField(match.id, showTeamResetWarning.field, showTeamResetWarning.value)
+    }
     setShowTeamResetWarning(null)
+    hideLoader()
+    router.refresh()
   }
 
   const isLoading = loading !== null
@@ -409,8 +508,7 @@ export function MatchDetailClient({
                 }
                 canEdit={isAdmin && !isPast}
                 onSave={async () => {
-                  const result = await updateMatchField(match.id, 'title', editTitle || null)
-                  if (result?.error) return { error: result.error }
+                  await handleFieldSave('title', editTitle || null)
                 }}
                 renderEditor={() => (
                   <Input
@@ -432,8 +530,7 @@ export function MatchDetailClient({
                 onSave={async () => {
                   const time = editUseCustomTime ? `${editCustomHour}:${editCustomMinute}` : editSelectedTime
                   const dateTime = new Date(`${editSelectedDate}T${time}:00.000Z`)
-                  const result = await updateMatchField(match.id, 'date_time', dateTime.toISOString())
-                  if (result?.error) return { error: result.error }
+                  await handleFieldSave('date_time', dateTime.toISOString())
                 }}
                 renderEditor={() => (
                   <div className="flex flex-col gap-3">
@@ -616,8 +713,7 @@ export function MatchDetailClient({
                 }
                 canEdit={isAdmin && !isPast}
                 onSave={async () => {
-                  const result = await updateMatchField(match.id, 'is_public', editIsPublic)
-                  if (result?.error) return { error: result.error }
+                  await handleFieldSave('is_public', editIsPublic)
                 }}
                 renderEditor={() => (
                   <div
@@ -661,166 +757,8 @@ export function MatchDetailClient({
         </CardHeader>
 
         <CardContent className="flex flex-col gap-6">
-          {/* Team Configuration - Compact */}
+          {/* Invites per player */}
           <div className="flex flex-wrap items-center gap-4 p-3 rounded-lg border border-border bg-muted/30">
-            <EditableField
-              icon={<Users className="w-4 h-4 text-primary" />}
-              displayValue={
-                <span className="text-foreground text-sm">
-                  {match.team_count === 0 ? 'Sin equipos' : `${match.team_count} equipos`}
-                </span>
-              }
-              canEdit={isAdmin && !isPast}
-              warning={players.length > 0 ? 'Cambiar movera jugadores a suplentes.' : undefined}
-              onSave={async () => {
-                const newTeamCount = editUseCustomTeamCount && editCustomTeamCount 
-                  ? parseInt(editCustomTeamCount) 
-                  : editTeamCount
-                if (newTeamCount !== match.team_count) {
-                  await handleTeamConfigChange('team_count', newTeamCount)
-                }
-              }}
-              renderEditor={() => (
-                <div className="flex flex-col gap-2">
-                  <div className="grid grid-cols-3 gap-1">
-                    <button
-                      type="button"
-                      onClick={() => { setEditTeamCount(0); setEditUseCustomTeamCount(false) }}
-                      className={`py-1.5 px-2 rounded-lg border-2 text-sm font-medium transition-all ${
-                        !editUseCustomTeamCount && editTeamCount === 0
-                          ? 'border-primary bg-primary/10 text-primary'
-                          : 'border-border hover:border-primary/50 hover:bg-muted/50'
-                      }`}
-                    >
-                      Sin equipos
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => { setEditTeamCount(2); setEditUseCustomTeamCount(false) }}
-                      className={`py-1.5 px-2 rounded-lg border-2 text-sm font-medium transition-all ${
-                        !editUseCustomTeamCount && editTeamCount === 2
-                          ? 'border-primary bg-primary/10 text-primary'
-                          : 'border-border hover:border-primary/50 hover:bg-muted/50'
-                      }`}
-                    >
-                      2 Equipos
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setEditUseCustomTeamCount(true)}
-                      className={`py-1.5 px-2 rounded-lg border-2 text-sm font-medium transition-all ${
-                        editUseCustomTeamCount
-                          ? 'border-primary bg-primary/10 text-primary'
-                          : 'border-border hover:border-primary/50 hover:bg-muted/50'
-                      }`}
-                    >
-                      Otro
-                    </button>
-                  </div>
-                  {editUseCustomTeamCount && (
-                    <Input
-                      type="number"
-                      min="2"
-                      max="10"
-                      value={editCustomTeamCount}
-                      onChange={(e) => setEditCustomTeamCount(e.target.value)}
-                      placeholder="Cantidad de equipos"
-                    />
-                  )}
-                </div>
-              )}
-            />
-
-            {match.team_count > 0 && (
-              <EditableField
-                icon={<Users className="w-4 h-4 text-primary" />}
-                displayValue={<span className="text-foreground text-sm">{match.team_size} por equipo</span>}
-                canEdit={isAdmin && !isPast}
-                warning={players.length > 0 ? 'Cambiar movera jugadores a suplentes.' : undefined}
-                onSave={async () => {
-                  const newTeamSize = editUseCustomTeamSize && editCustomTeamSize 
-                    ? parseInt(editCustomTeamSize) 
-                    : editTeamSize
-                  if (newTeamSize !== match.team_size) {
-                    await handleTeamConfigChange('team_size', newTeamSize)
-                  }
-                }}
-                renderEditor={() => (
-                  <div className="flex flex-col gap-2">
-                    <div className="grid grid-cols-3 gap-1">
-                      <button
-                        type="button"
-                        onClick={() => { setEditTeamSize(5); setEditUseCustomTeamSize(false) }}
-                        className={`py-1.5 px-2 rounded-lg border-2 text-sm font-medium transition-all ${
-                          !editUseCustomTeamSize && editTeamSize === 5
-                            ? 'border-primary bg-primary/10 text-primary'
-                            : 'border-border hover:border-primary/50 hover:bg-muted/50'
-                        }`}
-                      >
-                        5
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => { setEditTeamSize(10); setEditUseCustomTeamSize(false) }}
-                        className={`py-1.5 px-2 rounded-lg border-2 text-sm font-medium transition-all ${
-                          !editUseCustomTeamSize && editTeamSize === 10
-                            ? 'border-primary bg-primary/10 text-primary'
-                            : 'border-border hover:border-primary/50 hover:bg-muted/50'
-                        }`}
-                      >
-                        10
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setEditUseCustomTeamSize(true)}
-                        className={`py-1.5 px-2 rounded-lg border-2 text-sm font-medium transition-all ${
-                          editUseCustomTeamSize
-                            ? 'border-primary bg-primary/10 text-primary'
-                            : 'border-border hover:border-primary/50 hover:bg-muted/50'
-                        }`}
-                      >
-                        Otro
-                      </button>
-                    </div>
-                    {editUseCustomTeamSize && (
-                      <Input
-                        type="number"
-                        min="1"
-                        max="50"
-                        value={editCustomTeamSize}
-                        onChange={(e) => setEditCustomTeamSize(e.target.value)}
-                        placeholder="Cantidad de jugadores"
-                      />
-                    )}
-                  </div>
-                )}
-              />
-            )}
-
-            {/* Max players */}
-            <EditableField
-              icon={<Users className="w-4 h-4 text-primary" />}
-              displayValue={<span className="text-foreground text-sm">Max {match.max_players} jugadores</span>}
-              canEdit={isAdmin && !isPast}
-              onSave={async () => {
-                const val = parseInt(editMaxPlayers)
-                if (!isNaN(val) && val !== match.max_players) {
-                  await handleFieldSave('max_players', val)
-                }
-              }}
-              renderEditor={() => (
-                <Input
-                  type="number"
-                  min="2"
-                  max="100"
-                  defaultValue={match.max_players}
-                  onChange={(e) => setEditMaxPlayers(e.target.value)}
-                  placeholder="Max jugadores"
-                />
-              )}
-            />
-
-            {/* Invites per player */}
             <EditableField
               icon={<Users className="w-4 h-4 text-primary" />}
               displayValue={
@@ -858,12 +796,158 @@ export function MatchDetailClient({
             />
           </div>
 
+          {/* Team Configuration */}
+          <div className="flex flex-wrap items-center gap-4 p-3 rounded-lg border border-border bg-muted/30">
+            <EditableField
+              icon={<Users className="w-4 h-4 text-primary" />}
+              displayValue={
+                <span className="text-foreground text-sm">
+                  {match.team_count === 0
+                    ? `Sin equipos - Max ${match.max_players} jugadores`
+                    : `${match.team_count} equipo(s) - ${match.team_size} por equipo - Max ${computedMaxPlayersValue(match.team_count, match.team_size)} jugadores`}
+                </span>
+              }
+              canEdit={isAdmin && !isPast}
+              warning={players.length > 0 ? 'Cambiar quitara las asignaciones de equipos actuales.' : undefined}
+              onSave={async () => {
+                const teamCountValue = editUseCustomTeamCount && editCustomTeamCount ? parseInt(editCustomTeamCount) : editTeamCount
+                const teamSizeValue = editUseCustomTeamSize && editCustomTeamSize ? parseInt(editCustomTeamSize) : editTeamSize
+                const maxPlayersValue = parseInt(editMaxPlayers)
+                const safeMaxPlayers = Number.isFinite(maxPlayersValue) ? maxPlayersValue : match.max_players
+
+                await saveTeamSettings(teamCountValue, teamSizeValue, safeMaxPlayers)
+              }}
+              renderEditor={() => (
+                <div className="flex flex-col gap-3">
+                  <div className="flex flex-col gap-2">
+                    <span className="text-xs text-muted-foreground font-medium">Equipos</span>
+                    <div className="grid grid-cols-3 gap-1">
+                      <button
+                        type="button"
+                        onClick={() => { setEditTeamCount(0); setEditUseCustomTeamCount(false) }}
+                        className={`py-1.5 px-2 rounded-lg border-2 text-sm font-medium transition-all ${
+                          !editUseCustomTeamCount && editTeamCount === 0
+                            ? 'border-primary bg-primary/10 text-primary'
+                            : 'border-border hover:border-primary/50 hover:bg-muted/50'
+                        }`}
+                      >
+                        Sin equipos
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => { setEditTeamCount(2); setEditUseCustomTeamCount(false) }}
+                        className={`py-1.5 px-2 rounded-lg border-2 text-sm font-medium transition-all ${
+                          !editUseCustomTeamCount && editTeamCount === 2
+                            ? 'border-primary bg-primary/10 text-primary'
+                            : 'border-border hover:border-primary/50 hover:bg-muted/50'
+                        }`}
+                      >
+                        2 Equipos
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setEditUseCustomTeamCount(true)}
+                        className={`py-1.5 px-2 rounded-lg border-2 text-sm font-medium transition-all ${
+                          editUseCustomTeamCount
+                            ? 'border-primary bg-primary/10 text-primary'
+                            : 'border-border hover:border-primary/50 hover:bg-muted/50'
+                        }`}
+                      >
+                        Otro
+                      </button>
+                    </div>
+                    {editUseCustomTeamCount && (
+                      <Input
+                        type="number"
+                        min="2"
+                        max="10"
+                        value={editCustomTeamCount}
+                        onChange={(e) => setEditCustomTeamCount(e.target.value)}
+                        placeholder="Cantidad de equipos"
+                      />
+                    )}
+                  </div>
+
+                  {(editUseCustomTeamCount ? parseInt(editCustomTeamCount || '0') : editTeamCount) > 0 && (
+                    <div className="flex flex-col gap-2">
+                      <span className="text-xs text-muted-foreground font-medium">Jugadores por equipo</span>
+                      <div className="grid grid-cols-3 gap-1">
+                        <button
+                          type="button"
+                          onClick={() => { setEditTeamSize(5); setEditUseCustomTeamSize(false) }}
+                          className={`py-1.5 px-2 rounded-lg border-2 text-sm font-medium transition-all ${
+                            !editUseCustomTeamSize && editTeamSize === 5
+                              ? 'border-primary bg-primary/10 text-primary'
+                              : 'border-border hover:border-primary/50 hover:bg-muted/50'
+                          }`}
+                        >
+                          5
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => { setEditTeamSize(10); setEditUseCustomTeamSize(false) }}
+                          className={`py-1.5 px-2 rounded-lg border-2 text-sm font-medium transition-all ${
+                            !editUseCustomTeamSize && editTeamSize === 10
+                              ? 'border-primary bg-primary/10 text-primary'
+                              : 'border-border hover:border-primary/50 hover:bg-muted/50'
+                          }`}
+                        >
+                          10
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setEditUseCustomTeamSize(true)}
+                          className={`py-1.5 px-2 rounded-lg border-2 text-sm font-medium transition-all ${
+                            editUseCustomTeamSize
+                              ? 'border-primary bg-primary/10 text-primary'
+                              : 'border-border hover:border-primary/50 hover:bg-muted/50'
+                          }`}
+                        >
+                          Otro
+                        </button>
+                      </div>
+                      {editUseCustomTeamSize && (
+                        <Input
+                          type="number"
+                          min="1"
+                          max="50"
+                          value={editCustomTeamSize}
+                          onChange={(e) => setEditCustomTeamSize(e.target.value)}
+                          placeholder="Cantidad de jugadores"
+                        />
+                      )}
+
+                      <div className="text-xs text-muted-foreground p-2 rounded-md border border-border bg-muted/30">
+                        Max jugadores se calcula automaticamente: <span className="font-semibold text-foreground">{computedMaxPlayersValue(
+                          (editUseCustomTeamCount && editCustomTeamCount ? parseInt(editCustomTeamCount) : editTeamCount) || 1,
+                          (editUseCustomTeamSize && editCustomTeamSize ? parseInt(editCustomTeamSize) : editTeamSize) || 1,
+                        )}</span>
+                      </div>
+                    </div>
+                  )}
+
+                  {(editUseCustomTeamCount ? parseInt(editCustomTeamCount || '0') : editTeamCount) === 0 && (
+                    <div className="flex flex-col gap-2">
+                      <span className="text-xs text-muted-foreground font-medium">Maximo de jugadores</span>
+                      <Input
+                        type="number"
+                        min="2"
+                        max="100"
+                        value={editMaxPlayers}
+                        onChange={(e) => setEditMaxPlayers(e.target.value)}
+                        placeholder="Max jugadores"
+                      />
+                    </div>
+                  )}
+                </div>
+              )}
+            />
+          </div>
+
           {/* Join buttons (only when not in match) */}
           {!isPast && !userParticipation && (
             <div className="flex flex-col gap-2">
-              {error && (
-                <p className="text-sm text-destructive">{error}</p>
-              )}
+              {/* errors are shown via ErrorToastProvider */}
               <div className="flex flex-wrap gap-2">
                 <Button
                   onClick={() => handleJoin('PLAYER')}
@@ -871,7 +955,7 @@ export function MatchDetailClient({
                   className="gap-2"
                 >
                   {loading === 'join-PLAYER' ? (
-                    <FootballLoader size="sm" />
+                    <InlineLoader size="sm" />
                   ) : (
                     <UserPlus className="w-4 h-4" />
                   )}
@@ -883,7 +967,7 @@ export function MatchDetailClient({
                   disabled={isLoading}
                 >
                   {loading === 'join-SUBSTITUTE' ? (
-                    <FootballLoader size="sm" />
+                    <InlineLoader size="sm" />
                   ) : (
                     'Como suplente'
                   )}
@@ -894,7 +978,7 @@ export function MatchDetailClient({
                   disabled={isLoading}
                 >
                   {loading === 'join-EXTRA' ? (
-                    <FootballLoader size="sm" />
+                    <InlineLoader size="sm" />
                   ) : (
                     'Por las dudas'
                   )}
@@ -932,7 +1016,7 @@ export function MatchDetailClient({
                     className="gap-2 bg-transparent"
                   >
                     {loading === 'randomize' ? (
-                      <FootballLoader size="sm" />
+                      <InlineLoader size="sm" />
                     ) : (
                       <Shuffle className="w-4 h-4" />
                     )}
@@ -978,7 +1062,7 @@ export function MatchDetailClient({
           {!isPast && (
             <div className="flex items-center justify-between flex-wrap gap-2 pt-4 border-t border-border">
               <div>
-                {error && <p className="text-sm text-destructive">{error}</p>}
+                {/* errors are shown via ErrorToastProvider */}
               </div>
               <div className="flex items-center gap-2 ml-auto">
                 {isCreator && (
@@ -1002,7 +1086,7 @@ export function MatchDetailClient({
                     className="gap-2"
                   >
                     {loading === 'leave' ? (
-                      <FootballLoader size="sm" />
+                      <InlineLoader size="sm" />
                     ) : (
                       <UserMinus className="w-4 h-4" />
                     )}
@@ -1084,7 +1168,8 @@ export function MatchDetailClient({
           <AlertDialogHeader>
             <AlertDialogTitle>Cambiar configuracion de equipos</AlertDialogTitle>
             <AlertDialogDescription>
-              Cambiar la configuracion de equipos movera a todos los jugadores a la lista de suplentes. Queres continuar?
+              Cambiar la configuracion de equipos va a quitar las asignaciones actuales (equipos) de todos los jugadores.
+              Podras rearmarlos despues. Queres continuar?
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

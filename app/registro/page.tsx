@@ -10,16 +10,16 @@ import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { register } from '@/app/actions/auth'
 import { LoadingOverlay } from '@/components/football-loader'
+import { useErrorToast } from '@/components/error-toast-provider'
 
 export default function RegistroPage() {
-  const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
   const [loading, setLoading] = useState(false)
   const router = useRouter()
+  const { showError } = useErrorToast()
 
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault()
-    setError('')
     setSuccess('')
     setLoading(true)
 
@@ -27,7 +27,7 @@ export default function RegistroPage() {
     const result = await register(formData)
 
     if (result?.error) {
-      setError(result.error)
+      showError('Error al crear cuenta', result.error)
       setLoading(false)
     } else if (result?.success) {
       if (result.pending) {
@@ -112,9 +112,7 @@ export default function RegistroPage() {
                 </p>
               </div>
 
-              {error && (
-                <p className="text-sm text-destructive text-center">{error}</p>
-              )}
+              {/* errors are shown via ErrorToastProvider */}
 
               <Button type="submit" className="w-full" disabled={loading}>
                 Crear cuenta

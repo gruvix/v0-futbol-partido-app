@@ -1,0 +1,129 @@
+/*
+  FootballLoader styles
+  Keep colors centralized via CSS variables below.
+*/
+
+:root {
+  --football-loader-overlay: rgba(0, 0, 0, 0.8);
+  --football-loader-blue: #74acdf;
+  --football-loader-white: #ffffff;
+  --football-loader-accent: #f6b40e;
+}
+
+.main-fader {
+  width: 100%;
+  height: 100vh;
+  position: fixed;
+  inset: 0;
+  background-color: var(--football-loader-overlay);
+  z-index: 9999;
+}
+
+.main-fader .loader {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+}
+
+.main-fader .loader svg {
+  height: 300px;
+  display: block;
+  margin: 0 auto;
+}
+
+/*
+  Inline embed support:
+  when the loader is used inside buttons/inline content, wrap it with .football-loader-inline
+  to disable the fixed full-screen overlay behavior.
+*/
+
+.football-loader-inline .main-fader {
+  position: static;
+  inset: unset;
+  width: auto;
+  height: auto;
+  background-color: transparent;
+  z-index: auto;
+}
+
+.football-loader-inline .main-fader .loader {
+  position: static;
+  top: auto;
+  left: auto;
+  transform: none;
+}
+
+/* Base path style */
+.main-fader .loader svg path {
+  animation-duration: 1.2s;
+  animation-name: pulse-arg;
+  animation-iteration-count: infinite;
+  fill: var(--football-loader-white);
+  transform-origin: 50% 50%;
+}
+
+/* Alternating colors for a flag effect */
+.main-fader .loader svg .path-0,
+.main-fader .loader svg .path-2,
+.main-fader .loader svg .path-4,
+.main-fader .loader svg .path-6 {
+  fill: var(--football-loader-blue);
+}
+
+.main-fader .loader svg .path-1,
+.main-fader .loader svg .path-3,
+.main-fader .loader svg .path-5,
+.main-fader .loader svg .path-7 {
+  fill: var(--football-loader-white);
+}
+
+/* Staggered Delays */
+.main-fader .loader svg .path-7 {
+  animation-delay: -1.2s;
+}
+
+.main-fader .loader svg .path-6 {
+  animation-delay: -1.05s;
+}
+
+.main-fader .loader svg .path-5 {
+  animation-delay: -0.9s;
+}
+
+.main-fader .loader svg .path-4 {
+  animation-delay: -0.75s;
+}
+
+.main-fader .loader svg .path-3 {
+  animation-delay: -0.6s;
+}
+
+.main-fader .loader svg .path-2 {
+  animation-delay: -0.45s;
+}
+
+.main-fader .loader svg .path-1 {
+  animation-delay: -0.3s;
+}
+
+.main-fader .loader svg .path-0 {
+  animation-delay: -0.15s;
+}
+
+@keyframes pulse-arg {
+  0% {
+    opacity: 0.3;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 1;
+    fill: var(--football-loader-accent);
+    transform: scale(1.05);
+  }
+  100% {
+    opacity: 0.3;
+    transform: scale(1);
+  }
+}
+  

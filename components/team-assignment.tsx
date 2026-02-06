@@ -3,7 +3,8 @@
 import { useState, useRef, type DragEvent, type TouchEvent as ReactTouchEvent } from 'react'
 import { Badge } from '@/components/ui/badge'
 import { cn } from '@/lib/utils'
-import { GripVertical, Shield, Loader2 } from 'lucide-react'
+import { GripVertical, Shield } from 'lucide-react'
+import { InlineLoader } from '@/components/football-loader'
 
 interface Participant {
   id: number
@@ -201,7 +202,7 @@ export function TeamAssignment({
           )}
         >
           {isLoading ? (
-            <Loader2 className="w-3 h-3 animate-spin text-muted-foreground shrink-0" />
+            <InlineLoader size="sm" className="shrink-0" />
           ) : canDrag ? (
             <GripVertical className="w-3 h-3 text-muted-foreground shrink-0" />
           ) : null}

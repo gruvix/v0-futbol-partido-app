@@ -3,6 +3,8 @@ import { redirect } from 'next/navigation'
 import { getSession } from '@/lib/auth'
 import { DashboardNav } from '@/components/dashboard-nav'
 import { ActionLoaderWrapper } from '@/components/action-loader-provider'
+import { RouteLoader } from '@/components/route-loader'
+import { ErrorToastProvider } from '@/components/error-toast-provider'
 import { initializeDatabase } from '@/lib/db'
 
 export default async function DashboardLayout({
@@ -25,12 +27,15 @@ export default async function DashboardLayout({
 
   return (
     <ActionLoaderWrapper>
-      <div className="min-h-screen bg-background">
-        <DashboardNav userName={session.name} />
-        <main className="container mx-auto px-4 py-6 max-w-4xl">
-          {children}
-        </main>
-      </div>
+      <ErrorToastProvider>
+        <div className="min-h-screen bg-background">
+          <RouteLoader />
+          <DashboardNav userName={session.name} />
+          <main className="container mx-auto px-4 py-6 max-w-4xl">
+            {children}
+          </main>
+        </div>
+      </ErrorToastProvider>
     </ActionLoaderWrapper>
   )
 }

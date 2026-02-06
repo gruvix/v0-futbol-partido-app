@@ -4,6 +4,7 @@ import { useState, useCallback, type ReactNode } from 'react'
 import { Button } from '@/components/ui/button'
 import { Settings, X, Check } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { useErrorToast } from '@/components/error-toast-provider'
 
 interface EditableFieldProps {
   /** Current display value when not editing */
@@ -34,37 +35,34 @@ export function EditableField({
   icon,
   label,
 }: EditableFieldProps) {
+  const { showError } = useErrorToast()
   const [isEditing, setIsEditing] = useState(false)
   const [isSaving, setIsSaving] = useState(false)
-  const [error, setError] = useState('')
 
   const handleStartEdit = useCallback(() => {
     setIsEditing(true)
-    setError('')
   }, [])
 
   const handleCancel = useCallback(() => {
     setIsEditing(false)
-    setError('')
   }, [])
 
   const handleSave = useCallback(async () => {
     setIsSaving(true)
-    setError('')
     try {
       const result = await onSave()
       if (result?.error) {
-        setError(result.error)
+        showError('Error al guardar', result.error)
       } else {
         setIsEditing(false)
       }
     } catch (e) {
-      setError('Error al guardar')
+      showError('Error al guardar')
       console.error(e)
     } finally {
       setIsSaving(false)
     }
-  }, [onSave])
+  }, [onSave, showError])
 
   if (isEditing) {
     return (
@@ -76,9 +74,7 @@ export function EditableField({
               {warning}
             </p>
           )}
-          {error && (
-            <p className="text-xs text-destructive">{error}</p>
-          )}
+          {/* errors are shown via ErrorToastProvider */}
         </div>
         <div className="flex items-center gap-1">
           <Button

@@ -1,8 +1,12 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useEffect, useState } from 'react'
+import { Check, Search, UserPlus } from 'lucide-react'
+
+import { getAllUsers, getInviteCount, invitePlayer } from '@/app/actions/matches'
+import { useErrorToast } from '@/components/error-toast-provider'
+import { InlineLoader, useActionLoader } from '@/components/football-loader'
 import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
 import {
   Dialog,
   DialogContent,
@@ -10,9 +14,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
-import { getAllUsers, invitePlayer, getInviteCount } from '@/app/actions/matches'
-import { FootballLoader, InlineLoader } from '@/components/football-loader'
-import { Check, UserPlus, Search } from 'lucide-react'
+import { Input } from '@/components/ui/input'
 
 interface User {
   id: number
@@ -36,13 +38,15 @@ export function InvitePlayersDialog({
   currentParticipantIds,
   invitesPerPlayer,
   currentUserId,
-}: InvitePlayersDialogProps) {
+}: InvitePlayersDialogProps): React.JSX.Element {
+  const { showError } = useErrorToast()
+  const { showLoader, hideLoader } = useActionLoader()
+
   const [users, setUsers] = useState<User[]>([])
   const [loadingUsers, setLoadingUsers] = useState(false)
   const [invitingId, setInvitingId] = useState<number | null>(null)
   const [invitedIds, setInvitedIds] = useState<number[]>([])
   const [search, setSearch] = useState('')
-  const [error, setError] = useState('')
   const [myInviteCount, setMyInviteCount] = useState(0)
 
   const hasLimit = invitesPerPlayer !== null && invitesPerPlayer !== undefined
@@ -50,45 +54,52 @@ export function InvitePlayersDialog({
   const reachedLimit = hasLimit && remainingInvites <= 0
 
   useEffect(() => {
-    if (open) {
-      loadUsers()
-      setInvitedIds([])
-      setSearch('')
-      if (hasLimit) {
-        getInviteCount(matchId, currentUserId).then(r => setMyInviteCount(r.count))
+    if (!open) return
+
+    setInvitedIds([])
+    setSearch('')
+
+    async function init(): Promise<void> {
+      try {
+        setLoadingUsers(true)
+        const result = await getAllUsers()
+        if (result?.users) setUsers(result.users as User[])
+
+        if (hasLimit) {
+          const r = await getInviteCount(matchId, currentUserId)
+          setMyInviteCount(r.count)
+        }
+      } catch (e) {
+        console.error(e)
+        showError('Error al cargar jugadores')
+      } finally {
+        setLoadingUsers(false)
       }
     }
-  }, [open, hasLimit, matchId, currentUserId])
 
-  async function loadUsers() {
-    setLoadingUsers(true)
-    const result = await getAllUsers()
-    if (result.users) {
-      setUsers(result.users)
-    }
-    setLoadingUsers(false)
-  }
+    void init()
+  }, [open, hasLimit, matchId, currentUserId, showError])
 
-  async function handleInvite(userId: number) {
+  async function handleInvite(userId: number): Promise<void> {
     setInvitingId(userId)
-    setError('')
+    showLoader('Invitando jugador...')
     const result = await invitePlayer(matchId, userId, 'PLAYER')
-    
+    hideLoader()
+
     if (result?.error) {
-      setError(result.error)
-    } else {
-      setInvitedIds(prev => [...prev, userId])
+      showError('Error al intentar invitar jugador', result.error)
+      setInvitingId(null)
+      return
     }
+
+    setInvitedIds(prev => [...prev, userId])
     setInvitingId(null)
   }
 
-  const availableUsers = users.filter(
-    u => !currentParticipantIds.includes(u.id) && !invitedIds.includes(u.id)
-  )
+  const availableUsers = users.filter(u => !currentParticipantIds.includes(u.id) && !invitedIds.includes(u.id))
 
   const filteredUsers = availableUsers.filter(
-    u => u.name.toLowerCase().includes(search.toLowerCase()) ||
-         u.phone_last_four.includes(search)
+    u => u.name.toLowerCase().includes(search.toLowerCase()) || u.phone_last_four.includes(search)
   )
 
   return (
@@ -97,7 +108,7 @@ export function InvitePlayersDialog({
         <DialogHeader>
           <DialogTitle>Invitar jugadores</DialogTitle>
           <DialogDescription>
-            {hasLimit 
+            {hasLimit
               ? `Podes invitar ${remainingInvites > 0 ? remainingInvites : 0} jugador(es) mas (limite: ${invitesPerPlayer} por persona)`
               : 'Agrega jugadores al partido'}
           </DialogDescription>
@@ -113,10 +124,6 @@ export function InvitePlayersDialog({
           />
         </div>
 
-        {error && (
-          <p className="text-sm text-destructive">{error}</p>
-        )}
-
         <div className="flex-1 overflow-y-auto min-h-0 -mx-6 px-6">
           {loadingUsers ? (
             <div className="flex items-center justify-center py-8">
@@ -131,7 +138,6 @@ export function InvitePlayersDialog({
               {filteredUsers.map((user) => {
                 const isInviting = invitingId === user.id
                 const isInvited = invitedIds.includes(user.id)
-                
                 return (
                   <div
                     key={user.id}
@@ -143,13 +149,13 @@ export function InvitePlayersDialog({
                     </div>
                     <Button
                       size="sm"
-                      variant={isInvited ? "secondary" : "default"}
-                      onClick={() => handleInvite(user.id)}
+                      variant={isInvited ? 'secondary' : 'default'}
+                      onClick={() => void handleInvite(user.id)}
                       disabled={isInviting || isInvited || reachedLimit}
                       className="gap-2"
                     >
                       {isInviting ? (
-                        <FootballLoader size="sm" />
+                        <InlineLoader size="sm" />
                       ) : isInvited ? (
                         <>
                           <Check className="w-4 h-4" />

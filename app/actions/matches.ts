@@ -4,6 +4,11 @@ import { sql } from '@/lib/db'
 import { getSession } from '@/lib/auth'
 import { revalidatePath } from 'next/cache'
 
+function computedMaxPlayers(teamCount: number, teamSize: number): number {
+  if (teamCount <= 0) return 0
+  return Math.max(1, teamCount) * Math.max(1, teamSize)
+}
+
 export async function createMatch(formData: FormData) {
   const session = await getSession()
   if (!session) {
@@ -19,7 +24,11 @@ export async function createMatch(formData: FormData) {
   const titleInput = formData.get('title') as string
   const teamCount = parseInt(formData.get('teamCount') as string) || 0
   const teamSize = parseInt(formData.get('teamSize') as string) || 5
-  const maxPlayers = parseInt(formData.get('maxPlayers') as string) || 10
+  // max_players rules:
+  // - if teamCount > 0 (teams mode), it is derived as teamCount * teamSize
+  // - if teamCount === 0 (no teams), creator can choose it
+  const requestedMaxPlayers = parseInt(formData.get('maxPlayers') as string) || 10
+  const maxPlayers = teamCount > 0 ? computedMaxPlayers(teamCount, teamSize) : requestedMaxPlayers
   const invitesPerPlayerStr = formData.get('invitesPerPlayer') as string
   const invitesPerPlayer = invitesPerPlayerStr ? parseInt(invitesPerPlayerStr) : null
 
@@ -59,7 +68,7 @@ export async function createMatch(formData: FormData) {
       VALUES (${matchId}, ${session.userId})
     `
 
-    revalidatePath('/dashboard', 'max')
+    revalidatePath('/dashboard')
     return { success: true, matchId, redirect: `/dashboard/partido/${matchId}` }
   } catch (error) {
     console.error('Error creating match:', error)
@@ -94,8 +103,8 @@ export async function joinMatch(matchId: number, role: 'PLAYER' | 'SUBSTITUTE' |
       `
     }
 
-    revalidatePath(`/dashboard/partido/${matchId}`, 'max')
-    revalidatePath('/dashboard', 'max')
+    revalidatePath(`/dashboard/partido/${matchId}`)
+    revalidatePath('/dashboard')
     return { success: true }
   } catch (error) {
     console.error('Error joining match:', error)
@@ -120,8 +129,8 @@ export async function leaveMatch(matchId: number) {
       SELECT COUNT(*) as count FROM match_participants WHERE match_id = ${matchId}
     `
 
-    revalidatePath(`/dashboard/partido/${matchId}`, 'max')
-    revalidatePath('/dashboard', 'max')
+    revalidatePath(`/dashboard/partido/${matchId}`)
+    revalidatePath('/dashboard')
     
     return { 
       success: true, 
@@ -151,7 +160,7 @@ export async function deleteMatch(matchId: number) {
 
   try {
     await sql`DELETE FROM matches WHERE id = ${matchId}`
-    revalidatePath('/dashboard', 'max')
+    revalidatePath('/dashboard')
     return { success: true, redirect: '/dashboard' }
   } catch (error) {
     console.error('Error deleting match:', error)
@@ -183,7 +192,7 @@ export async function assignTeam(matchId: number, participantId: number, team: '
       WHERE id = ${participantId} AND match_id = ${matchId}
     `
 
-    revalidatePath(`/dashboard/partido/${matchId}`, 'max')
+    revalidatePath(`/dashboard/partido/${matchId}`)
     return { success: true }
   } catch (error) {
     console.error('Error assigning team:', error)
@@ -230,7 +239,7 @@ export async function randomizeTeams(matchId: number) {
       `
     }
 
-    revalidatePath(`/dashboard/partido/${matchId}`, 'max')
+    revalidatePath(`/dashboard/partido/${matchId}`)
     return { success: true }
   } catch (error) {
     console.error('Error randomizing teams:', error)
@@ -281,8 +290,8 @@ export async function invitePlayer(matchId: number, userId: number, role: 'PLAYE
       ON CONFLICT (match_id, inviter_user_id, invited_user_id) DO NOTHING
     `
 
-    revalidatePath(`/dashboard/partido/${matchId}`, 'max')
-    revalidatePath('/dashboard', 'max')
+    revalidatePath(`/dashboard/partido/${matchId}`)
+    revalidatePath('/dashboard')
     return { success: true }
   } catch (error) {
     console.error('Error inviting player:', error)
@@ -362,6 +371,17 @@ export async function updateMatchField(
     return { error: 'Campo no permitido' }
   }
 
+  // Enforce max_players derivation when teams are enabled
+  // - If team_count > 0, max_players is always team_count * team_size
+  // - Disallow directly setting max_players in that mode
+  if (field === 'max_players') {
+    const match = await sql`SELECT team_count FROM matches WHERE id = ${matchId}`
+    const teamCount = Number(match[0]?.team_count ?? 0)
+    if (teamCount > 0) {
+      return { error: 'max_players se calcula automaticamente cuando hay equipos' }
+    }
+  }
+
   try {
     // Build the query dynamically based on field
     if (field === 'title') {
@@ -376,8 +396,20 @@ export async function updateMatchField(
       await sql`UPDATE matches SET field = ${value as string} WHERE id = ${matchId}`
     } else if (field === 'team_count') {
       await sql`UPDATE matches SET team_count = ${value as number} WHERE id = ${matchId}`
+      const match = await sql`SELECT team_count, team_size FROM matches WHERE id = ${matchId}`
+      const teamCount = Number(match[0]?.team_count ?? 0)
+      const teamSize = Number(match[0]?.team_size ?? 0)
+      if (teamCount > 0) {
+        await sql`UPDATE matches SET max_players = ${computedMaxPlayers(teamCount, teamSize)} WHERE id = ${matchId}`
+      }
     } else if (field === 'team_size') {
       await sql`UPDATE matches SET team_size = ${value as number} WHERE id = ${matchId}`
+      const match = await sql`SELECT team_count, team_size FROM matches WHERE id = ${matchId}`
+      const teamCount = Number(match[0]?.team_count ?? 0)
+      const teamSize = Number(match[0]?.team_size ?? 0)
+      if (teamCount > 0) {
+        await sql`UPDATE matches SET max_players = ${computedMaxPlayers(teamCount, teamSize)} WHERE id = ${matchId}`
+      }
     } else if (field === 'is_public') {
       await sql`UPDATE matches SET is_public = ${value as boolean} WHERE id = ${matchId}`
     } else if (field === 'max_players') {
@@ -386,8 +418,8 @@ export async function updateMatchField(
       await sql`UPDATE matches SET invites_per_player = ${value as number | null} WHERE id = ${matchId}`
     }
 
-    revalidatePath(`/dashboard/partido/${matchId}`, 'max')
-    revalidatePath('/dashboard', 'max')
+    revalidatePath(`/dashboard/partido/${matchId}`)
+    revalidatePath('/dashboard')
     return { success: true }
   } catch (error) {
     console.error('Error updating match:', error)
@@ -413,10 +445,38 @@ export async function resetTeamsToSubstitutes(matchId: number) {
       SET role = 'SUBSTITUTE', team = NULL, team_number = NULL
       WHERE match_id = ${matchId}
     `
-    revalidatePath(`/dashboard/partido/${matchId}`, 'max')
-    return { success: true }
+    revalidatePath(`/dashboard/partido/${matchId}`)
+    revalidatePath('/dashboard')
   } catch (error) {
     console.error('Error resetting teams:', error)
+    return { error: 'Error al resetear equipos' }
+  }
+}
+
+// Normalize participants when switching between team modes.
+// - If switching to NO TEAMS (team_count === 0): keep role as-is, clear team/team_number for everyone.
+// - If switching to TEAMS (team_count > 0): keep role as-is, clear team/team_number for everyone (so they appear in the "Sin equipo" list).
+export async function resetTeamsToNoTeam(matchId: number) {
+  const session = await getSession()
+  if (!session) {
+    return { error: 'No autenticado' }
+  }
+
+  const isAdmin = await isMatchAdmin(matchId)
+  if (!isAdmin) {
+    return { error: 'Solo los administradores pueden modificar el partido' }
+  }
+
+  try {
+    await sql`
+      UPDATE match_participants
+      SET team = NULL, team_number = NULL
+      WHERE match_id = ${matchId}
+    `
+    revalidatePath(`/dashboard/partido/${matchId}`)
+    return { success: true }
+  } catch (error) {
+    console.error('Error resetting teams to no-team:', error)
     return { error: 'Error al resetear equipos' }
   }
 }
@@ -447,7 +507,7 @@ export async function addMatchAdmin(matchId: number, userId: number) {
       VALUES (${matchId}, ${userId})
       ON CONFLICT (match_id, user_id) DO NOTHING
     `
-    revalidatePath(`/dashboard/partido/${matchId}`, 'max')
+    revalidatePath(`/dashboard/partido/${matchId}`)
     return { success: true }
   } catch (error) {
     console.error('Error adding admin:', error)
@@ -477,7 +537,7 @@ export async function removeMatchAdmin(matchId: number, userId: number) {
     await sql`
       DELETE FROM match_admins WHERE match_id = ${matchId} AND user_id = ${userId}
     `
-    revalidatePath(`/dashboard/partido/${matchId}`, 'max')
+    revalidatePath(`/dashboard/partido/${matchId}`)
     return { success: true }
   } catch (error) {
     console.error('Error removing admin:', error)
@@ -519,7 +579,7 @@ export async function changeParticipantRole(matchId: number, participantId: numb
       SET role = ${newRole}, team = NULL, team_number = NULL
       WHERE id = ${participantId} AND match_id = ${matchId}
     `
-    revalidatePath(`/dashboard/partido/${matchId}`, 'max')
+    revalidatePath(`/dashboard/partido/${matchId}`)
     return { success: true }
   } catch (error) {
     console.error('Error changing role:', error)
@@ -559,7 +619,7 @@ export async function assignTeamNumber(matchId: number, participantId: number, t
       WHERE id = ${participantId} AND match_id = ${matchId}
     `
 
-    revalidatePath(`/dashboard/partido/${matchId}`, 'max')
+    revalidatePath(`/dashboard/partido/${matchId}`)
     return { success: true }
   } catch (error) {
     console.error('Error assigning team number:', error)
