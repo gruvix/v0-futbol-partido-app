@@ -217,7 +217,7 @@ export function TeamAssignment({
         <Badge 
           variant={isSub ? 'secondary' : teamIndex === null ? 'default' : 'outline'}
           className={cn(
-            "py-1.5 px-3 transition-all inline-flex items-center gap-1 w-full",
+            "py-1.5 px-3 transition-all inline-flex items-center gap-1 w-2/3",
             colors && `${colors.border} ${colors.bg}`,
             canDrag && !isLoading && "touch-none cursor-grab active:cursor-grabbing",
           )}
@@ -232,8 +232,8 @@ export function TeamAssignment({
           {playerNumber !== undefined && (
             <span className="text-[10px] font-bold text-muted-foreground mr-0.5">{playerNumber}.</span>
           )}
-          <span>{participant.name}</span>
-          <span className="text-muted-foreground text-[10px]">({participant.phone_last_four})</span>
+          <span className="min-w-0 flex-1 truncate">{participant.name}</span>
+          <span className="text-muted-foreground text-[10px] shrink-0">({participant.phone_last_four})</span>
           {/* Admin shield inside badge */}
           {isAdmin && !isPast && onToggleAdmin && participant.user_id !== matchCreatorId ? (
             <button
