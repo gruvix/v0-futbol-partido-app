@@ -143,6 +143,44 @@ export async function leaveMatch(matchId: number) {
   }
 }
 
+export async function removeParticipant(matchId: number, participantId: number) {
+  const session = await getSession()
+  if (!session) {
+    return { error: 'No autenticado' }
+  }
+
+  const isAdmin = await isMatchAdmin(matchId)
+  if (!isAdmin) {
+    return { error: 'Solo los administradores pueden quitar jugadores' }
+  }
+
+  try {
+    const participant = await sql`
+      SELECT user_id FROM match_participants
+      WHERE match_id = ${matchId} AND id = ${participantId}
+    `
+    const userId = participant[0]?.user_id
+    if (!userId) {
+      return { error: 'Jugador no encontrado' }
+    }
+
+    await sql`
+      DELETE FROM match_admins
+      WHERE match_id = ${matchId} AND user_id = ${userId}
+    `
+    await sql`
+      DELETE FROM match_participants
+      WHERE match_id = ${matchId} AND id = ${participantId}
+    `
+    revalidatePath(`/dashboard/partido/${matchId}`)
+    revalidatePath('/dashboard')
+    return { success: true }
+  } catch (error) {
+    console.error('Error removing participant:', error)
+    return { error: 'Error al quitar jugador' }
+  }
+}
+
 export async function deleteMatch(matchId: number) {
   const session = await getSession()
   if (!session) {
