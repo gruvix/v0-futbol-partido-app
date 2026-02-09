@@ -1,6 +1,18 @@
 'use client'
 
-import { useState, useRef, type DragEvent, type TouchEvent as ReactTouchEvent } from 'react'
+import { useMemo, useState } from 'react'
+import {
+  DndContext,
+  DragOverlay,
+  PointerSensor,
+  TouchSensor,
+  useDraggable,
+  useDroppable,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+  type DragStartEvent,
+} from '@dnd-kit/core'
 import { Badge } from '@/components/ui/badge'
 import { cn } from '@/lib/utils'
 import { GripVertical, Shield } from 'lucide-react'
@@ -37,6 +49,7 @@ interface TeamAssignmentProps {
   matchCreatorId?: number
   onToggleAdmin?: (userId: number, isCurrentlyAdmin: boolean) => void
   loadingParticipantIds?: Set<number>
+  onAssignTeamNumber?: (participantId: number, teamNumber: number | null) => void
 }
 
 const TEAM_COLORS = [
@@ -65,13 +78,24 @@ export function TeamAssignment({
   matchCreatorId,
   onToggleAdmin,
   loadingParticipantIds = new Set(),
+  onAssignTeamNumber,
 }: TeamAssignmentProps) {
-  const [draggedParticipantId, setDraggedParticipantId] = useState<number | null>(null)
-  const [draggedFromSubs, setDraggedFromSubs] = useState(false)
-  const [dragOverZone, setDragOverZone] = useState<string | null>(null)
-  const dragNodeRef = useRef<HTMLDivElement | null>(null)
+  const [activeDrag, setActiveDrag] = useState<Participant | null>(null)
 
   const canDrag = isAdmin && !isPast
+
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
+    useSensor(TouchSensor, { activationConstraint: { delay: 150, tolerance: 6 } })
+  )
+
+  const participantById = useMemo(() => {
+    const map = new Map<number, Participant>()
+    for (const participant of [...participants, ...substitutes]) {
+      map.set(participant.id, participant)
+    }
+    return map
+  }, [participants, substitutes])
 
   const getTeamNumber = (p: Participant): number | null => {
     if (p.team_number !== undefined && p.team_number !== null) return p.team_number
@@ -98,44 +122,26 @@ export function TeamAssignment({
     return admins.some(a => a.user_id === userId)
   }
 
-  // --- Drag handlers ---
-  function handleDragStart(e: DragEvent<HTMLDivElement>, participantId: number, fromSubs: boolean) {
-    if (!canDrag) return
-    e.dataTransfer.effectAllowed = 'move'
-    e.dataTransfer.setData('text/plain', participantId.toString())
-    e.dataTransfer.setData('application/from-subs', fromSubs ? '1' : '0')
-    setDraggedParticipantId(participantId)
-    setDraggedFromSubs(fromSubs)
+  type DragPayload = { participantId: number; fromSubs: boolean }
+
+  function handleDragStart(event: DragStartEvent) {
+    const data = event.active.data.current as DragPayload | undefined
+    if (!data) return
+    const dragged = participantById.get(data.participantId) || null
+    setActiveDrag(dragged)
   }
 
-  function handleDragEnd() {
-    setDraggedParticipantId(null)
-    setDraggedFromSubs(false)
-    setDragOverZone(null)
-  }
-
-  function handleDragOver(e: DragEvent<HTMLDivElement>, zone: string) {
-    if (!canDrag) return
-    e.preventDefault()
-    e.dataTransfer.dropEffect = 'move'
-    setDragOverZone(zone)
-  }
-
-  function handleDragLeave() {
-    setDragOverZone(null)
-  }
-
-  function handleDrop(e: DragEvent<HTMLDivElement>, zone: string) {
-    if (!canDrag) return
-    e.preventDefault()
-    const participantId = parseInt(e.dataTransfer.getData('text/plain'), 10)
-    const fromSubs = e.dataTransfer.getData('application/from-subs') === '1'
-    if (!isNaN(participantId)) {
-      processDropAction(participantId, zone, fromSubs)
+  function handleDragEnd(event: DragEndEvent) {
+    const data = event.active.data.current as DragPayload | undefined
+    const overId = event.over?.id
+    if (data && typeof overId === 'string') {
+      processDropAction(data.participantId, overId, data.fromSubs)
     }
-    setDraggedParticipantId(null)
-    setDraggedFromSubs(false)
-    setDragOverZone(null)
+    setActiveDrag(null)
+  }
+
+  function handleDragCancel() {
+    setActiveDrag(null)
   }
 
   function processDropAction(participantId: number, zone: string, fromSubs: boolean) {
@@ -149,19 +155,32 @@ export function TeamAssignment({
       if (fromSubs && onPromoteToPlayer) {
         onPromoteToPlayer(participantId)
       } else if (!fromSubs) {
-        onAssignTeam(participantId, null)
+        if (teamCount > 2 && onAssignTeamNumber) {
+          onAssignTeamNumber(participantId, null)
+        } else {
+          onAssignTeam(participantId, null)
+        }
       }
     } else if (zone.startsWith('team-')) {
       // Drop into a team
-      if (fromSubs && onPromoteToPlayer) {
-        // First promote, then assign team - handled by parent
-        onPromoteToPlayer(participantId)
-        // After promotion, also assign team
-        const teamLetter = zone === 'team-1' ? 'A' as const : 'B' as const
-        setTimeout(() => onAssignTeam(participantId, teamLetter), 100)
-      } else {
-        const teamLetter = zone === 'team-1' ? 'A' as const : 'B' as const
+      const teamNumber = Number.parseInt(zone.replace('team-', ''), 10)
+      if (!Number.isFinite(teamNumber)) return
+      const assignToTeam = () => {
+        if (teamCount > 2) {
+          if (onAssignTeamNumber) {
+            onAssignTeamNumber(participantId, teamNumber)
+          }
+          return
+        }
+        const teamLetter = teamNumber === 1 ? 'A' as const : 'B' as const
         onAssignTeam(participantId, teamLetter)
+      }
+
+      if (fromSubs && onPromoteToPlayer) {
+        onPromoteToPlayer(participantId)
+        setTimeout(assignToTeam, 100)
+      } else {
+        assignToTeam()
       }
     }
   }
@@ -178,33 +197,42 @@ export function TeamAssignment({
     isSub?: boolean
     playerNumber?: number
   }) {
-    const isDragging = draggedParticipantId === participant.id
     const isPlayerAdmin = isParticipantAdmin(participant.user_id)
     const isLoading = loadingParticipantIds.has(participant.id)
     const colors = teamIndex !== null ? TEAM_COLORS[teamIndex % TEAM_COLORS.length] : null
+    const { attributes, listeners, setNodeRef, setActivatorNodeRef, isDragging } = useDraggable({
+      id: participant.id,
+      data: { participantId: participant.id, fromSubs: isSub },
+      disabled: !canDrag || isLoading,
+    })
 
     return (
-      <div 
+      <div
+        ref={setNodeRef}
         className={cn(
           "transition-all select-none",
           isDragging && "opacity-40"
         )}
-        draggable={canDrag && !isLoading}
-        onDragStart={(e) => handleDragStart(e, participant.id, isSub)}
-        onDragEnd={handleDragEnd}
       >
         <Badge 
           variant={isSub ? 'secondary' : teamIndex === null ? 'default' : 'outline'}
           className={cn(
             "py-1.5 px-3 transition-all inline-flex items-center gap-1",
             colors && `${colors.border} ${colors.bg}`,
-            canDrag && !isLoading && "cursor-grab active:cursor-grabbing",
+            canDrag && !isLoading && "touch-none",
           )}
         >
           {isLoading ? (
             <InlineLoader size="sm" className="shrink-0" />
           ) : canDrag ? (
-            <GripVertical className="w-3 h-3 text-muted-foreground shrink-0" />
+            <span
+              ref={setActivatorNodeRef}
+              {...listeners}
+              {...attributes}
+              className="cursor-grab active:cursor-grabbing shrink-0"
+            >
+              <GripVertical className="w-3 h-3 text-muted-foreground" />
+            </span>
           ) : null}
           {playerNumber !== undefined && (
             <span className="text-[10px] font-bold text-muted-foreground mr-0.5">{playerNumber}.</span>
@@ -244,11 +272,12 @@ export function TeamAssignment({
     className?: string
     teamIndex?: number
   }) {
-    const isOver = dragOverZone === zone && draggedParticipantId !== null
+    const { isOver, setNodeRef } = useDroppable({ id: zone, disabled: !canDrag })
     const colors = teamIndex !== undefined ? TEAM_COLORS[teamIndex % TEAM_COLORS.length] : null
     
     return (
       <div
+        ref={setNodeRef}
         className={cn(
           "min-h-[48px] rounded-lg transition-all",
           canDrag && "border-2 border-dashed",
@@ -257,19 +286,37 @@ export function TeamAssignment({
           isOver && !colors && "border-muted-foreground bg-muted/50",
           extraClass
         )}
-        onDragOver={(e) => handleDragOver(e, zone)}
-        onDragLeave={handleDragLeave}
-        onDrop={(e) => handleDrop(e, zone)}
       >
         {children}
       </div>
     )
   }
 
+  function DragOverlayBadge({ participant }: { participant: Participant }) {
+    const teamNumber = getTeamNumber(participant)
+    const teamIndex = teamNumber !== null ? teamNumber - 1 : null
+    const colors = teamIndex !== null ? TEAM_COLORS[teamIndex % TEAM_COLORS.length] : null
+    const isSub = participant.role === 'SUBSTITUTE'
+
+    return (
+      <Badge
+        variant={isSub ? 'secondary' : teamIndex === null ? 'default' : 'outline'}
+        className={cn(
+          "py-1.5 px-3 inline-flex items-center gap-1",
+          colors && `${colors.border} ${colors.bg}`
+        )}
+      >
+        <GripVertical className="w-3 h-3 text-muted-foreground" />
+        <span>{participant.name}</span>
+        <span className="text-muted-foreground text-[10px]">({participant.phone_last_four})</span>
+      </Badge>
+    )
+  }
+
   // --- Render helpers ---
   function renderPlayerList(list: Participant[], teamIndex: number | null, isSub: boolean = false) {
     return (
-      <div className="flex flex-wrap gap-1.5 p-1">
+      <div className="flex flex-col gap-1.5 p-1">
         {list.map((p, i) => (
           <PlayerBadge 
             key={p.id} 
@@ -289,61 +336,107 @@ export function TeamAssignment({
   }
 
   // ==== No teams (team_count === 0) - just players + subs ====
-  if (teamCount === 0) {
-    return (
-      <div className="flex flex-col gap-4">
-        {/* Players list */}
-        <div className="flex flex-col gap-2">
-          <h4 className="text-sm font-medium text-muted-foreground">
-            Jugadores ({participants.length}/{maxPlayers})
-          </h4>
-          <DropZone zone="none">
-            {renderPlayerList(participants, null)}
-          </DropZone>
-        </div>
-
-        {/* Substitutes */}
-        <div className="flex flex-col gap-2">
-          <h4 className="text-sm font-medium text-muted-foreground">
-            Suplentes ({substitutes.length})
-          </h4>
-          <DropZone zone="substitutes">
-            {renderPlayerList(substitutes, null, true)}
-          </DropZone>
-        </div>
-      </div>
-    )
-  }
-
-  // ==== 2 teams ====
-  if (teamCount === 2) {
-    const teamA = teamGroups[1] || []
-    const teamB = teamGroups[2] || []
-
-    return (
-      <div className="flex flex-col gap-4">
-        <div className="grid grid-cols-2 gap-4">
-          {/* Team A */}
+  const content = (() => {
+    if (teamCount === 0) {
+      return (
+        <div className="flex flex-col gap-4">
+          {/* Players list */}
           <div className="flex flex-col gap-2">
-            <h4 className={cn("text-sm font-semibold flex items-center gap-2", TEAM_COLORS[0].text)}>
-              <span className={cn("w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold", TEAM_COLORS[0].badge)}>A</span>
-              Equipo A ({teamA.length}/{teamSize})
+            <h4 className="text-sm font-medium text-muted-foreground">
+              Jugadores ({participants.length}/{maxPlayers})
             </h4>
-            <DropZone zone="team-1" teamIndex={0}>
-              {renderPlayerList(teamA, 0)}
+            <DropZone zone="none">
+              {renderPlayerList(participants, null)}
             </DropZone>
           </div>
 
-          {/* Team B */}
+          {/* Substitutes */}
           <div className="flex flex-col gap-2">
-            <h4 className={cn("text-sm font-semibold flex items-center gap-2", TEAM_COLORS[1].text)}>
-              <span className={cn("w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold", TEAM_COLORS[1].badge)}>B</span>
-              Equipo B ({teamB.length}/{teamSize})
+            <h4 className="text-sm font-medium text-muted-foreground">
+              Suplentes ({substitutes.length})
             </h4>
-            <DropZone zone="team-2" teamIndex={1}>
-              {renderPlayerList(teamB, 1)}
+            <DropZone zone="substitutes">
+              {renderPlayerList(substitutes, null, true)}
             </DropZone>
           </div>
+        </div>
+      )
+    }
+
+    if (teamCount === 2) {
+      const teamA = teamGroups[1] || []
+      const teamB = teamGroups[2] || []
+
+      return (
+        <div className="flex flex-col gap-4">
+          <div className="grid grid-cols-2 gap-4">
+            {/* Team A */}
+            <div className="flex flex-col gap-2">
+              <h4 className={cn("text-sm font-semibold flex items-center gap-2", TEAM_COLORS[0].text)}>
+                <span className={cn("w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold", TEAM_COLORS[0].badge)}>A</span>
+                Equipo A ({teamA.length}/{teamSize})
+              </h4>
+              <DropZone zone="team-1" teamIndex={0}>
+                {renderPlayerList(teamA, 0)}
+              </DropZone>
+            </div>
+
+            {/* Team B */}
+            <div className="flex flex-col gap-2">
+              <h4 className={cn("text-sm font-semibold flex items-center gap-2", TEAM_COLORS[1].text)}>
+                <span className={cn("w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold", TEAM_COLORS[1].badge)}>B</span>
+                Equipo B ({teamB.length}/{teamSize})
+              </h4>
+              <DropZone zone="team-2" teamIndex={1}>
+                {renderPlayerList(teamB, 1)}
+              </DropZone>
+            </div>
+          </div>
+
+          {/* Always visible no-team list */}
+          <div className="flex flex-col gap-2">
+            <h4 className="text-sm font-medium text-muted-foreground">Sin equipo ({noTeam.length})</h4>
+            <DropZone zone="none">
+              {renderPlayerList(noTeam, null)}
+            </DropZone>
+          </div>
+
+          {/* Substitutes */}
+          <div className="flex flex-col gap-2">
+            <h4 className="text-sm font-medium text-muted-foreground">Suplentes ({substitutes.length})</h4>
+            <DropZone zone="substitutes">
+              {renderPlayerList(substitutes, null, true)}
+            </DropZone>
+          </div>
+        </div>
+      )
+    }
+
+    return (
+      <div className="flex flex-col gap-4">
+        <div className={cn(
+          "grid gap-4",
+          teamCount <= 3 ? "grid-cols-3" : teamCount === 4 ? "grid-cols-2 md:grid-cols-4" : "grid-cols-2 md:grid-cols-3"
+        )}>
+          {Array.from({ length: teamCount }, (_, i) => {
+            const teamNum = i + 1
+            const teamPlayers = teamGroups[teamNum] || []
+            const colors = TEAM_COLORS[i % TEAM_COLORS.length]
+
+            return (
+              <div key={teamNum} className="flex flex-col gap-2">
+                <h4 className={cn("text-sm font-semibold flex items-center gap-2", colors.text)}>
+                  <span className={cn("w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold", colors.badge)}>
+                    {teamNum}
+                  </span>
+                  Equipo {teamNum} ({teamPlayers.length}/{teamSize})
+                </h4>
+                <DropZone zone={`team-${teamNum}`} teamIndex={i}>
+                  {renderPlayerList(teamPlayers, i)}
+                </DropZone>
+              </div>
+            )
+          })}
         </div>
 
         {/* Always visible no-team list */}
@@ -363,51 +456,19 @@ export function TeamAssignment({
         </div>
       </div>
     )
-  }
+  })()
 
-  // ==== More than 2 teams ====
   return (
-    <div className="flex flex-col gap-4">
-      <div className={cn(
-        "grid gap-4",
-        teamCount <= 3 ? "grid-cols-3" : teamCount === 4 ? "grid-cols-2 md:grid-cols-4" : "grid-cols-2 md:grid-cols-3"
-      )}>
-        {Array.from({ length: teamCount }, (_, i) => {
-          const teamNum = i + 1
-          const teamPlayers = teamGroups[teamNum] || []
-          const colors = TEAM_COLORS[i % TEAM_COLORS.length]
-
-          return (
-            <div key={teamNum} className="flex flex-col gap-2">
-              <h4 className={cn("text-sm font-semibold flex items-center gap-2", colors.text)}>
-                <span className={cn("w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold", colors.badge)}>
-                  {teamNum}
-                </span>
-                Equipo {teamNum} ({teamPlayers.length}/{teamSize})
-              </h4>
-              <DropZone zone={`team-${teamNum}`} teamIndex={i}>
-                {renderPlayerList(teamPlayers, i)}
-              </DropZone>
-            </div>
-          )
-        })}
-      </div>
-
-      {/* Always visible no-team list */}
-      <div className="flex flex-col gap-2">
-        <h4 className="text-sm font-medium text-muted-foreground">Sin equipo ({noTeam.length})</h4>
-        <DropZone zone="none">
-          {renderPlayerList(noTeam, null)}
-        </DropZone>
-      </div>
-
-      {/* Substitutes */}
-      <div className="flex flex-col gap-2">
-        <h4 className="text-sm font-medium text-muted-foreground">Suplentes ({substitutes.length})</h4>
-        <DropZone zone="substitutes">
-          {renderPlayerList(substitutes, null, true)}
-        </DropZone>
-      </div>
-    </div>
+    <DndContext
+      sensors={sensors}
+      onDragStart={handleDragStart}
+      onDragEnd={handleDragEnd}
+      onDragCancel={handleDragCancel}
+    >
+      {content}
+      <DragOverlay>
+        {activeDrag ? <DragOverlayBadge participant={activeDrag} /> : null}
+      </DragOverlay>
+    </DndContext>
   )
 }
