@@ -15,7 +15,7 @@ import {
 } from '@dnd-kit/core'
 import { Badge } from '@/components/ui/badge'
 import { cn } from '@/lib/utils'
-import { GripVertical, Shield } from 'lucide-react'
+import { Shield } from 'lucide-react'
 import { InlineLoader } from '@/components/football-loader'
 
 interface Participant {
@@ -47,9 +47,9 @@ interface TeamAssignmentProps {
   maxPlayers: number
   admins?: Admin[]
   matchCreatorId?: number
-  onToggleAdmin?: (userId: number, isCurrentlyAdmin: boolean) => void
   loadingParticipantIds?: Set<number>
   onAssignTeamNumber?: (participantId: number, teamNumber: number | null) => void
+  onSelectParticipant?: (participantId: number) => void
 }
 
 const TEAM_COLORS = [
@@ -76,9 +76,9 @@ export function TeamAssignment({
   maxPlayers,
   admins = [],
   matchCreatorId,
-  onToggleAdmin,
   loadingParticipantIds = new Set(),
   onAssignTeamNumber,
+  onSelectParticipant,
 }: TeamAssignmentProps) {
   const [activeDrag, setActiveDrag] = useState<Participant | null>(null)
 
@@ -165,6 +165,16 @@ export function TeamAssignment({
       // Drop into a team
       const teamNumber = Number.parseInt(zone.replace('team-', ''), 10)
       if (!Number.isFinite(teamNumber)) return
+      if (teamCount > 0 && teamSize > 0) {
+        const dragged = participantById.get(participantId)
+        if (dragged) {
+          const targetTeamCount = teamGroups[teamNumber]?.length ?? 0
+          const isAlreadyInTeam = getTeamNumber(dragged) === teamNumber
+          if (!isAlreadyInTeam && targetTeamCount >= teamSize) {
+            return
+          }
+        }
+      }
       const assignToTeam = () => {
         if (teamCount > 2) {
           if (onAssignTeamNumber) {
@@ -190,15 +200,14 @@ export function TeamAssignment({
     participant, 
     teamIndex,
     isSub = false,
-    playerNumber
   }: { 
     participant: Participant
     teamIndex: number | null
     isSub?: boolean
-    playerNumber?: number
   }) {
     const isPlayerAdmin = isParticipantAdmin(participant.user_id)
     const isLoading = loadingParticipantIds.has(participant.id)
+    const isCreator = participant.user_id === matchCreatorId
     const colors = teamIndex !== null ? TEAM_COLORS[teamIndex % TEAM_COLORS.length] : null
     const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
       id: participant.id,
@@ -210,46 +219,35 @@ export function TeamAssignment({
       <div
         ref={setNodeRef}
         className={cn(
-          "transition-all select-none",
+          "transition-all select-none w-full min-w-0",
           isDragging && "opacity-40"
         )}
       >
         <Badge 
           variant={isSub ? 'secondary' : teamIndex === null ? 'default' : 'outline'}
           className={cn(
-            "py-1.5 px-3 transition-all inline-flex items-center gap-1 w-2/3",
+            "py-1 px-2 md:py-1.5 md:px-3 transition-all inline-flex w-full overflow-hidden max-w-full flex-col items-start gap-0.5 md:flex-row md:items-center md:gap-1",
             colors && `${colors.border} ${colors.bg}`,
             canDrag && !isLoading && "touch-none cursor-grab active:cursor-grabbing",
           )}
           {...attributes}
           {...listeners}
+          onClick={() => onSelectParticipant?.(participant.id)}
         >
           {isLoading ? (
             <InlineLoader size="sm" className="shrink-0" />
-          ) : canDrag ? (
-            <GripVertical className="w-3 h-3 text-muted-foreground shrink-0" />
           ) : null}
-          {playerNumber !== undefined && (
-            <span className="text-[10px] font-bold text-muted-foreground mr-0.5">{playerNumber}.</span>
-          )}
-          <span className="min-w-0 flex-1 truncate">{participant.name}</span>
-          <span className="text-muted-foreground text-[10px] shrink-0">({participant.phone_last_four})</span>
-          {/* Admin shield inside badge */}
-          {isAdmin && !isPast && onToggleAdmin && participant.user_id !== matchCreatorId ? (
-            <button
-              type="button"
-              onClick={(e) => { e.stopPropagation(); onToggleAdmin(participant.user_id, isPlayerAdmin) }}
-              className="ml-0.5 shrink-0"
-              title={isPlayerAdmin ? 'Quitar admin' : 'Hacer admin'}
-            >
-              <Shield className={cn(
-                "w-3 h-3 transition-colors",
-                isPlayerAdmin ? 'text-sky-400 opacity-100' : 'text-muted-foreground opacity-50 hover:opacity-80'
-              )} />
-            </button>
-          ) : isPlayerAdmin ? (
-            <Shield className="w-3 h-3 text-sky-400 shrink-0 ml-0.5" />
-          ) : null}
+          <span className="min-w-0 w-full truncate text-sm md:text-[13px] md:w-auto md:flex-1">
+            {participant.name}
+          </span>
+          <span className="text-muted-foreground text-[10px] md:text-[10px] flex items-center gap-1">
+            ({participant.phone_last_four})
+            {isCreator ? (
+              <Shield className="w-3 h-3 text-amber-400 shrink-0" />
+            ) : isPlayerAdmin ? (
+              <Shield className="w-3 h-3 text-sky-400 shrink-0" />
+            ) : null}
+          </span>
         </Badge>
       </div>
     )
@@ -274,7 +272,7 @@ export function TeamAssignment({
       <div
         ref={setNodeRef}
         className={cn(
-          "min-h-[48px] rounded-lg transition-all",
+          "min-h-[40px] md:min-h-[48px] rounded-lg transition-all w-full min-w-0",
           canDrag && "border-2 border-dashed",
           canDrag && !isOver && "border-transparent",
           isOver && colors && `${colors.border} ${colors.bg}`,
@@ -297,28 +295,27 @@ export function TeamAssignment({
       <Badge
         variant={isSub ? 'secondary' : teamIndex === null ? 'default' : 'outline'}
         className={cn(
-          "py-1.5 px-3 inline-flex items-center gap-1",
+          "py-1.5 px-3 inline-flex items-center gap-1 max-w-[240px]",
           colors && `${colors.border} ${colors.bg}`
         )}
       >
-        <GripVertical className="w-3 h-3 text-muted-foreground" />
-        <span>{participant.name}</span>
-        <span className="text-muted-foreground text-[10px]">({participant.phone_last_four})</span>
+        <span className="truncate max-w-[150px]">{participant.name}</span>
+        <span className="text-muted-foreground text-[10px] shrink-0">({participant.phone_last_four})</span>
       </Badge>
     )
   }
 
+
   // --- Render helpers ---
   function renderPlayerList(list: Participant[], teamIndex: number | null, isSub: boolean = false) {
     return (
-      <div className="flex flex-col gap-1.5 p-1">
-        {list.map((p, i) => (
+      <div className="flex flex-col gap-0.5 p-0 md:gap-1.5 md:p-1">
+        {list.map((p) => (
           <PlayerBadge 
             key={p.id} 
             participant={p} 
             teamIndex={teamIndex} 
             isSub={isSub}
-            playerNumber={!isSub ? i + 1 : undefined}
           />
         ))}
         {list.length === 0 && (
@@ -330,23 +327,46 @@ export function TeamAssignment({
     )
   }
 
+  function renderNumberedList(list: Participant[], totalSlots: number, teamIndex: number | null) {
+    return (
+      <div className="flex flex-col gap-0.5 p-0 md:gap-1.5 md:p-1">
+        {Array.from({ length: totalSlots }, (_, i) => {
+          const participant = list[i]
+
+          return (
+            <div key={i} className="flex items-start gap-1 md:gap-2 w-full min-w-0">
+              <span className="text-[10px] font-bold text-muted-foreground w-4 md:w-5 text-right pt-1">{i + 1}.</span>
+              {participant ? (
+                <div className="flex-1 min-w-0">
+                  <PlayerBadge participant={participant} teamIndex={teamIndex} />
+                </div>
+              ) : (
+                <div className="h-8 flex-1 min-w-0" />
+              )}
+            </div>
+          )
+        })}
+      </div>
+    )
+  }
+
   // ==== No teams (team_count === 0) - just players + subs ====
   const content = (() => {
     if (teamCount === 0) {
       return (
-        <div className="flex flex-col gap-4">
+        <div className="flex flex-col gap-0 md:gap-4">
           {/* Players list */}
-          <div className="flex flex-col gap-2">
+          <div className="flex flex-col gap-0 md:gap-2">
             <h4 className="text-sm font-medium text-muted-foreground">
               Jugadores ({participants.length}/{maxPlayers})
             </h4>
-            <DropZone zone="none">
-              {renderPlayerList(participants, null)}
-            </DropZone>
+          <DropZone zone="none">
+            {renderNumberedList(participants, maxPlayers, null)}
+          </DropZone>
           </div>
 
           {/* Substitutes */}
-          <div className="flex flex-col gap-2">
+          <div className="flex flex-col gap-0 md:gap-2">
             <h4 className="text-sm font-medium text-muted-foreground">
               Suplentes ({substitutes.length})
             </h4>
@@ -363,33 +383,33 @@ export function TeamAssignment({
       const teamB = teamGroups[2] || []
 
       return (
-        <div className="flex flex-col gap-4">
-          <div className="grid grid-cols-2 gap-4">
+        <div className="flex flex-col gap-0 md:gap-4">
+          <div className="grid grid-cols-2 gap-0 md:gap-4 auto-rows-fr items-stretch">
             {/* Team A */}
-            <div className="flex flex-col gap-2">
+            <div className="flex flex-col gap-0 md:gap-2 h-full">
               <h4 className={cn("text-sm font-semibold flex items-center gap-2", TEAM_COLORS[0].text)}>
                 <span className={cn("w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold", TEAM_COLORS[0].badge)}>A</span>
                 Equipo A ({teamA.length}/{teamSize})
               </h4>
               <DropZone zone="team-1" teamIndex={0}>
-                {renderPlayerList(teamA, 0)}
+                {renderNumberedList(teamA, teamSize, 0)}
               </DropZone>
             </div>
 
             {/* Team B */}
-            <div className="flex flex-col gap-2">
+            <div className="flex flex-col gap-0 md:gap-2 h-full">
               <h4 className={cn("text-sm font-semibold flex items-center gap-2", TEAM_COLORS[1].text)}>
                 <span className={cn("w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold", TEAM_COLORS[1].badge)}>B</span>
                 Equipo B ({teamB.length}/{teamSize})
               </h4>
               <DropZone zone="team-2" teamIndex={1}>
-                {renderPlayerList(teamB, 1)}
+                {renderNumberedList(teamB, teamSize, 1)}
               </DropZone>
             </div>
           </div>
 
           {/* Always visible no-team list */}
-          <div className="flex flex-col gap-2">
+          <div className="flex flex-col gap-0 md:gap-2">
             <h4 className="text-sm font-medium text-muted-foreground">Sin equipo ({noTeam.length})</h4>
             <DropZone zone="none">
               {renderPlayerList(noTeam, null)}
@@ -397,21 +417,22 @@ export function TeamAssignment({
           </div>
 
           {/* Substitutes */}
-          <div className="flex flex-col gap-2">
+          <div className="flex flex-col gap-0 md:gap-2">
             <h4 className="text-sm font-medium text-muted-foreground">Suplentes ({substitutes.length})</h4>
             <DropZone zone="substitutes">
               {renderPlayerList(substitutes, null, true)}
             </DropZone>
           </div>
+
         </div>
       )
     }
 
     return (
-      <div className="flex flex-col gap-4">
+      <div className="flex flex-col gap-0 md:gap-4">
         <div className={cn(
-          "grid gap-4",
-          teamCount <= 3 ? "grid-cols-3" : teamCount === 4 ? "grid-cols-2 md:grid-cols-4" : "grid-cols-2 md:grid-cols-3"
+          "grid gap-0 md:gap-4 auto-rows-fr items-stretch",
+          "grid-cols-2"
         )}>
           {Array.from({ length: teamCount }, (_, i) => {
             const teamNum = i + 1
@@ -419,7 +440,7 @@ export function TeamAssignment({
             const colors = TEAM_COLORS[i % TEAM_COLORS.length]
 
             return (
-              <div key={teamNum} className="flex flex-col gap-2">
+              <div key={teamNum} className="flex flex-col gap-0 md:gap-2 h-full">
                 <h4 className={cn("text-sm font-semibold flex items-center gap-2", colors.text)}>
                   <span className={cn("w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold", colors.badge)}>
                     {teamNum}
@@ -427,7 +448,7 @@ export function TeamAssignment({
                   Equipo {teamNum} ({teamPlayers.length}/{teamSize})
                 </h4>
                 <DropZone zone={`team-${teamNum}`} teamIndex={i}>
-                  {renderPlayerList(teamPlayers, i)}
+                  {renderNumberedList(teamPlayers, teamSize, i)}
                 </DropZone>
               </div>
             )
@@ -435,7 +456,7 @@ export function TeamAssignment({
         </div>
 
         {/* Always visible no-team list */}
-        <div className="flex flex-col gap-2">
+        <div className="flex flex-col gap-0 md:gap-2">
           <h4 className="text-sm font-medium text-muted-foreground">Sin equipo ({noTeam.length})</h4>
           <DropZone zone="none">
             {renderPlayerList(noTeam, null)}
@@ -443,12 +464,13 @@ export function TeamAssignment({
         </div>
 
         {/* Substitutes */}
-        <div className="flex flex-col gap-2">
+        <div className="flex flex-col gap-0 md:gap-2">
           <h4 className="text-sm font-medium text-muted-foreground">Suplentes ({substitutes.length})</h4>
           <DropZone zone="substitutes">
             {renderPlayerList(substitutes, null, true)}
           </DropZone>
         </div>
+
       </div>
     )
   })()

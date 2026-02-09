@@ -10,22 +10,21 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
-import { 
-  ArrowLeft, 
-  MapPin, 
-  Calendar, 
-  Users, 
-  Shuffle, 
+import {
+  ArrowLeft,
+  MapPin,
+  Calendar,
+  Users,
+  Shuffle,
   Trash2,
   UserPlus,
   UserMinus,
   Share2,
   Globe,
   Lock,
-  Shield,
   ChevronLeft,
   ChevronRight,
-  Pencil
+  Pencil,
 } from 'lucide-react'
 import {
   joinMatch,
@@ -34,6 +33,7 @@ import {
   randomizeTeams,
   assignTeam,
   assignTeamNumber,
+  removeParticipant,
   updateMatchField,
   resetTeamsToNoTeam,
   addMatchAdmin,
@@ -45,6 +45,13 @@ import { InvitePlayersDialog } from '@/components/invite-players-dialog'
 import { InlineLoader, useActionLoader } from '@/components/football-loader'
 import { EditableField } from '@/components/editable-field'
 import { useErrorToast } from '@/components/error-toast-provider'
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -129,7 +136,17 @@ export function MatchDetailClient({
   const [showLastPlayerConfirm, setShowLastPlayerConfirm] = useState(false)
   const [showLeaveConfirm, setShowLeaveConfirm] = useState(false)
   const [showTeamResetWarning, setShowTeamResetWarning] = useState<{field: string, value: number} | null>(null)
-  const [showAdminConfirm, setShowAdminConfirm] = useState<{userId: number, isCurrentlyAdmin: boolean} | null>(null)
+  const [showKickConfirm, setShowKickConfirm] = useState<Participant | null>(null)
+  const [kickLoadingId, setKickLoadingId] = useState<number | null>(null)
+  const [selectedParticipantId, setSelectedParticipantId] = useState<number | null>(null)
+  const [editRole, setEditRole] = useState<'PLAYER' | 'SUBSTITUTE'>('PLAYER')
+  const [editTeamNumber, setEditTeamNumber] = useState<number | null>(null)
+  const [editIsAdmin, setEditIsAdmin] = useState(false)
+  const [initialEditState, setInitialEditState] = useState<{
+    role: 'PLAYER' | 'SUBSTITUTE'
+    teamNumber: number | null
+    isAdmin: boolean
+  } | null>(null)
   const router = useRouter()
   const { showLoader, hideLoader } = useActionLoader()
   const { showError } = useErrorToast()
@@ -222,6 +239,47 @@ export function MatchDetailClient({
   const players = effectiveParticipants.filter(p => p.role === 'PLAYER')
   const substitutes = effectiveParticipants.filter(p => p.role === 'SUBSTITUTE')
   const extras = effectiveParticipants.filter(p => p.role === 'EXTRA')
+
+  const getParticipantTeamNumber = (participant: Participant): number | null => {
+    if (participant.team_number !== null && participant.team_number !== undefined) {
+      return participant.team_number
+    }
+    if (participant.team === 'A') return 1
+    if (participant.team === 'B') return 2
+    return null
+  }
+
+  const teamPlayersMap = new Map<number, Participant[]>()
+  const noTeamPlayers: Participant[] = []
+
+  for (const player of players) {
+    const teamNum = getParticipantTeamNumber(player)
+    if (teamNum) {
+      const list = teamPlayersMap.get(teamNum) || []
+      list.push(player)
+      teamPlayersMap.set(teamNum, list)
+    } else {
+      noTeamPlayers.push(player)
+    }
+  }
+
+  const getParticipantStatusLabel = (participant: Participant): string => {
+    if (participant.role === 'SUBSTITUTE') return 'Suplente'
+    const teamNum = getParticipantTeamNumber(participant)
+    if (teamNum) {
+      const label = teamNum === 1 && participant.team === 'A'
+        ? 'A'
+        : teamNum === 2 && participant.team === 'B'
+          ? 'B'
+          : teamNum.toString()
+      return `Jugador de equipo ${label}`
+    }
+    return 'Jugador'
+  }
+
+  const selectedParticipant = selectedParticipantId
+    ? effectiveParticipants.find(p => p.id === selectedParticipantId) || null
+    : null
 
   // Max players:
   // - when teams are enabled, it is derived (team_count * team_size)
@@ -352,6 +410,15 @@ export function MatchDetailClient({
   }
 
   async function handleAssignTeam(participantId: number, team: 'A' | 'B' | null) {
+    if (match.team_count > 0 && team !== null) {
+      const teamSizeLimit = match.team_size
+      const currentTeamCount = effectiveParticipants.filter(p => p.role === 'PLAYER' && p.team === team).length
+      const isAlreadyInTeam = effectiveParticipants.find(p => p.id === participantId)?.team === team
+      if (!isAlreadyInTeam && currentTeamCount >= teamSizeLimit) {
+        showError('Equipo lleno', 'Ese equipo ya está completo.')
+        return
+      }
+    }
     // Optimistic: move player in UI immediately, show spinner on their badge
     setOptimisticOverrides(prev => ({ ...prev, [participantId]: { team } }))
     setLoadingParticipantIds(prev => {
@@ -383,6 +450,15 @@ export function MatchDetailClient({
   }
 
   async function handleAssignTeamNumber(participantId: number, teamNumber: number | null) {
+    if (teamNumber !== null) {
+      const teamSizeLimit = match.team_size
+      const currentTeamCount = effectiveParticipants.filter(p => p.role === 'PLAYER' && p.team_number === teamNumber).length
+      const isAlreadyInTeam = effectiveParticipants.find(p => p.id === participantId)?.team_number === teamNumber
+      if (!isAlreadyInTeam && currentTeamCount >= teamSizeLimit) {
+        showError('Equipo lleno', 'Ese equipo ya está completo.')
+        return
+      }
+    }
     setOptimisticOverrides(prev => ({ ...prev, [participantId]: { team: null } }))
     setLoadingParticipantIds(prev => {
       const next = new Set(prev)
@@ -454,26 +530,191 @@ export function MatchDetailClient({
     }
   }
 
-  function handleToggleAdmin(userId: number, isCurrentlyAdmin: boolean) {
-    setShowAdminConfirm({ userId, isCurrentlyAdmin })
+  function openParticipantPanel(participantId: number) {
+    const participant = effectiveParticipants.find(p => p.id === participantId)
+    if (!participant) return
+    setSelectedParticipantId(participantId)
+    const role: 'PLAYER' | 'SUBSTITUTE' = participant.role === 'SUBSTITUTE' ? 'SUBSTITUTE' : 'PLAYER'
+    setEditRole(role)
+    if (match.team_count > 0) {
+      const teamNum = participant.team_number ?? (participant.team === 'A' ? 1 : participant.team === 'B' ? 2 : null)
+      setEditTeamNumber(teamNum)
+    } else {
+      setEditTeamNumber(null)
+    }
+    const isCurrentlyAdmin = admins.some(admin => admin.user_id === participant.user_id)
+    const isAdminValue = isCurrentlyAdmin || participant.user_id === match.created_by_user_id
+    setEditIsAdmin(isAdminValue)
+
+    setInitialEditState({
+      role,
+      teamNumber: match.team_count > 0
+        ? (participant.team_number ?? (participant.team === 'A' ? 1 : participant.team === 'B' ? 2 : null))
+        : null,
+      isAdmin: isAdminValue,
+    })
   }
 
-  async function confirmToggleAdmin() {
-    if (!showAdminConfirm) return
-    const { userId, isCurrentlyAdmin } = showAdminConfirm
-    setShowAdminConfirm(null)
-    if (isCurrentlyAdmin) {
-      const result = await removeMatchAdmin(match.id, userId)
-      if (result?.error) {
-        showError('Error al intentar quitar administrador', result.error)
-      }
-    } else {
-      const result = await addMatchAdmin(match.id, userId)
-      if (result?.error) {
-        showError('Error al intentar agregar administrador', result.error)
+  function closeParticipantPanel() {
+    setSelectedParticipantId(null)
+    setInitialEditState(null)
+  }
+
+  function handleKickSelected() {
+    if (!selectedParticipant) return
+    if (selectedParticipant.user_id === match.created_by_user_id) return
+    setKickLoadingId(selectedParticipant.id)
+    setShowKickConfirm(selectedParticipant)
+  }
+
+  async function confirmKickParticipant() {
+    if (!showKickConfirm) return
+    const participantId = showKickConfirm.id
+    const result = await removeParticipant(match.id, participantId)
+    setKickLoadingId(null)
+    if (result?.error) {
+      showError('Error al intentar quitar jugador', result.error)
+    }
+    setShowKickConfirm(null)
+    closeParticipantPanel()
+  }
+
+  async function handleSaveParticipantChanges() {
+    if (!selectedParticipant) return
+    const participantId = selectedParticipant.id
+    const userId = selectedParticipant.user_id
+    const isCreatorUser = userId === match.created_by_user_id
+
+    setLoadingParticipantIds(prev => {
+      const next = new Set(prev)
+      next.add(participantId)
+      return next
+    })
+
+    const nextTeamNumber = editRole === 'SUBSTITUTE' ? null : editTeamNumber
+
+    if (match.team_count > 0 && editRole !== 'SUBSTITUTE') {
+      const teamSizeLimit = match.team_size
+      if (match.team_count > 2) {
+        if (nextTeamNumber !== null) {
+          const currentTeamCount = effectiveParticipants.filter(p => p.role === 'PLAYER' && p.team_number === nextTeamNumber).length
+          const isAlreadyInTeam = selectedParticipant.team_number === nextTeamNumber
+          if (!isAlreadyInTeam && currentTeamCount >= teamSizeLimit) {
+            showError('Equipo lleno', 'Ese equipo ya está completo.')
+            setLoadingParticipantIds(prev => {
+              const next = new Set(prev)
+              next.delete(participantId)
+              return next
+            })
+            return
+          }
+        }
+      } else {
+        const nextTeam: 'A' | 'B' | null = nextTeamNumber === 1 ? 'A' : nextTeamNumber === 2 ? 'B' : null
+        if (nextTeam !== null) {
+          const currentTeamCount = effectiveParticipants.filter(p => p.role === 'PLAYER' && p.team === nextTeam).length
+          const isAlreadyInTeam = selectedParticipant.team === nextTeam
+          if (!isAlreadyInTeam && currentTeamCount >= teamSizeLimit) {
+            showError('Equipo lleno', 'Ese equipo ya está completo.')
+            setLoadingParticipantIds(prev => {
+              const next = new Set(prev)
+              next.delete(participantId)
+              return next
+            })
+            return
+          }
+        }
       }
     }
+
+    setOptimisticOverrides(prev => ({
+      ...prev,
+      [participantId]: {
+        team: match.team_count > 0
+          ? (nextTeamNumber === 1 ? 'A' : nextTeamNumber === 2 ? 'B' : null)
+          : null,
+        role: editRole,
+      },
+    }))
+
+    if (selectedParticipant.role !== editRole) {
+      const roleResult = await changeParticipantRole(match.id, participantId, editRole)
+      if (roleResult?.error) {
+        showError('Error al intentar actualizar rol', roleResult.error)
+        setLoadingParticipantIds(prev => {
+          const next = new Set(prev)
+          next.delete(participantId)
+          return next
+        })
+        return
+      }
+    }
+
+    if (match.team_count > 0) {
+      if (match.team_count > 2) {
+        if ((selectedParticipant.team_number ?? null) !== nextTeamNumber) {
+          const teamResult = await assignTeamNumber(match.id, participantId, nextTeamNumber)
+          if (teamResult?.error) {
+            showError('Error al intentar mover jugador a equipo', teamResult.error)
+            setLoadingParticipantIds(prev => {
+              const next = new Set(prev)
+              next.delete(participantId)
+              return next
+            })
+            return
+          }
+        }
+      } else {
+        const currentTeam = selectedParticipant.team
+        const nextTeam: 'A' | 'B' | null = nextTeamNumber === 1 ? 'A' : nextTeamNumber === 2 ? 'B' : null
+        if (currentTeam !== nextTeam) {
+          const teamResult = await assignTeam(match.id, participantId, nextTeam)
+          if (teamResult?.error) {
+            showError('Error al intentar mover jugador a equipo', teamResult.error)
+            setLoadingParticipantIds(prev => {
+              const next = new Set(prev)
+              next.delete(participantId)
+              return next
+            })
+            return
+          }
+        }
+      }
+    }
+
+    if (!isCreatorUser) {
+      const isCurrentlyAdmin = admins.some(admin => admin.user_id === userId)
+      if (editIsAdmin !== isCurrentlyAdmin) {
+        const adminResult = editIsAdmin
+          ? await addMatchAdmin(match.id, userId)
+          : await removeMatchAdmin(match.id, userId)
+        if (adminResult?.error) {
+          showError('Error al intentar actualizar administrador', adminResult.error)
+          setLoadingParticipantIds(prev => {
+            const next = new Set(prev)
+            next.delete(participantId)
+            return next
+          })
+          return
+        }
+      }
+    }
+
+    setLoadingParticipantIds(prev => {
+      const next = new Set(prev)
+      next.delete(participantId)
+      return next
+    })
+    setOptimisticOverrides(prev => {
+      const next = { ...prev }
+      delete next[participantId]
+      return next
+    })
+    router.refresh()
+
+    closeParticipantPanel()
   }
+
 
   // Handle team config changes with warning
   async function handleTeamConfigChange(field: 'team_count' | 'team_size', value: number) {
@@ -1058,12 +1299,12 @@ export function MatchDetailClient({
               onAssignTeamNumber={handleAssignTeamNumber}
               onPromoteToPlayer={handlePromoteToPlayer}
               onDemoteToSubstitute={handleDemoteToSubstitute}
+              onSelectParticipant={openParticipantPanel}
               teamCount={match.team_count}
               teamSize={match.team_size}
               maxPlayers={maxPlayers}
               admins={admins}
               matchCreatorId={match.created_by_user_id}
-              onToggleAdmin={handleToggleAdmin}
               loadingParticipantIds={loadingParticipantIds}
             />
 
@@ -1204,27 +1445,162 @@ export function MatchDetailClient({
         </AlertDialogContent>
       </AlertDialog>
 
-      {/* Admin Toggle Confirmation Dialog */}
-      <AlertDialog open={showAdminConfirm !== null} onOpenChange={() => setShowAdminConfirm(null)}>
+
+      {/* Kick player confirmation dialog */}
+      <AlertDialog open={showKickConfirm !== null} onOpenChange={(open) => {
+        if (!open) {
+          setShowKickConfirm(null)
+          setKickLoadingId(null)
+        }
+      }}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>
-              {showAdminConfirm?.isCurrentlyAdmin ? 'Quitar administrador' : 'Hacer administrador'}
-            </AlertDialogTitle>
+            <AlertDialogTitle>Quitar jugador</AlertDialogTitle>
             <AlertDialogDescription>
-              {showAdminConfirm?.isCurrentlyAdmin
-                ? 'Seguro que queres quitar los permisos de administrador a este jugador?'
-                : 'Seguro que queres hacer administrador a este jugador? Podra modificar el partido y mover jugadores.'}
+              {showKickConfirm
+                ? `Seguro que queres quitar a ${showKickConfirm.name} del partido?`
+                : 'Seguro que queres quitar este jugador del partido?'}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancelar</AlertDialogCancel>
-            <AlertDialogAction onClick={confirmToggleAdmin}>
-              {showAdminConfirm?.isCurrentlyAdmin ? 'Quitar admin' : 'Hacer admin'}
+            <AlertDialogAction onClick={confirmKickParticipant} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+              Quitar
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      <Dialog open={selectedParticipantId !== null} onOpenChange={(open) => {
+        if (!open) {
+          closeParticipantPanel()
+        }
+      }}>
+        <DialogContent showCloseButton={false}>
+          <DialogHeader className="gap-2">
+            <div className="flex items-center justify-between">
+              <DialogTitle className="truncate">{selectedParticipant?.name ?? ''}</DialogTitle>
+              <button
+                type="button"
+                className="text-muted-foreground hover:text-foreground shrink-0"
+                onClick={closeParticipantPanel}
+              >
+                ✕
+              </button>
+            </div>
+          </DialogHeader>
+
+          {selectedParticipant && (
+            <div className="flex flex-col gap-4">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <span className="text-sm font-medium">
+                    {selectedParticipant.user_id === match.created_by_user_id
+                      ? 'Creador del partido'
+                      : editIsAdmin
+                        ? 'Administrador'
+                        : 'Miembro'}
+                  </span>
+                  {isAdmin && selectedParticipant.user_id !== match.created_by_user_id && (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setEditIsAdmin(prev => !prev)}
+                    >
+                      {editIsAdmin ? 'Quitar admin' : 'Hacer admin'}
+                    </Button>
+                  )}
+                </div>
+              </div>
+
+              <div className="flex flex-col gap-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-sm font-medium">{getParticipantStatusLabel(selectedParticipant)}</span>
+                </div>
+                <div className="flex flex-col gap-2">
+                  {match.team_count > 0 && (
+                    <select
+                      value={editTeamNumber === null ? '' : editTeamNumber.toString()}
+                      onChange={(e) => {
+                        const raw = e.target.value
+                        setEditTeamNumber(raw === '' ? null : Number.parseInt(raw, 10))
+                      }}
+                      disabled={editRole === 'SUBSTITUTE'}
+                      className="h-9 px-2 rounded-md border border-border bg-background text-foreground text-sm disabled:opacity-60"
+                    >
+                      <option value="">Sin equipo</option>
+                      {Array.from({ length: match.team_count }, (_, i) => i + 1).map((teamNum) => {
+                        const currentCount = effectiveParticipants.filter(p => p.role === 'PLAYER' && p.team_number === teamNum).length
+                        const isFull = currentCount >= match.team_size && selectedParticipant?.team_number !== teamNum
+                        return (
+                          <option key={teamNum} value={teamNum.toString()} disabled={isFull}>
+                            {isFull ? `Equipo ${teamNum} (lleno)` : `Equipo ${teamNum}`}
+                          </option>
+                        )
+                      })}
+                    </select>
+                  )}
+                  <div className="flex flex-wrap gap-2">
+                    <Button
+                      type="button"
+                      variant={editRole === 'PLAYER' ? 'default' : 'outline'}
+                      size="sm"
+                      onClick={() => setEditRole('PLAYER')}
+                    >
+                      Jugador
+                    </Button>
+                    <Button
+                      type="button"
+                      variant={editRole === 'SUBSTITUTE' ? 'default' : 'outline'}
+                      size="sm"
+                      onClick={() => {
+                        setEditRole('SUBSTITUTE')
+                        setEditTeamNumber(null)
+                      }}
+                    >
+                      Suplente
+                    </Button>
+                  </div>
+                </div>
+              </div>
+
+            </div>
+          )}
+
+          <DialogFooter>
+            <div className="flex flex-col gap-2 sm:flex-row sm:justify-end">
+              {isAdmin && selectedParticipant?.user_id !== match.created_by_user_id ? (
+                <Button
+                  type="button"
+                  variant="destructive"
+                  onClick={handleKickSelected}
+                  disabled={selectedParticipant ? kickLoadingId === selectedParticipant.id : false}
+                >
+                  {selectedParticipant && kickLoadingId === selectedParticipant.id ? <InlineLoader size="sm" /> : 'Echar'}
+                </Button>
+              ) : null}
+              <Button type="button" variant="outline" onClick={closeParticipantPanel}>
+                Cancelar
+              </Button>
+              <Button
+                type="button"
+                onClick={handleSaveParticipantChanges}
+                disabled={(() => {
+                  if (!selectedParticipant || !initialEditState) return true
+                  const changed =
+                    editRole !== initialEditState.role ||
+                    editTeamNumber !== initialEditState.teamNumber ||
+                    editIsAdmin !== initialEditState.isAdmin
+                  return !changed
+                })()}
+              >
+                Guardar
+              </Button>
+            </div>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }
