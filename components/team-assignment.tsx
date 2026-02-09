@@ -200,7 +200,7 @@ export function TeamAssignment({
     const isPlayerAdmin = isParticipantAdmin(participant.user_id)
     const isLoading = loadingParticipantIds.has(participant.id)
     const colors = teamIndex !== null ? TEAM_COLORS[teamIndex % TEAM_COLORS.length] : null
-    const { attributes, listeners, setNodeRef, setActivatorNodeRef, isDragging } = useDraggable({
+    const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
       id: participant.id,
       data: { participantId: participant.id, fromSubs: isSub },
       disabled: !canDrag || isLoading,
@@ -217,22 +217,17 @@ export function TeamAssignment({
         <Badge 
           variant={isSub ? 'secondary' : teamIndex === null ? 'default' : 'outline'}
           className={cn(
-            "py-1.5 px-3 transition-all inline-flex items-center gap-1",
+            "py-1.5 px-3 transition-all inline-flex items-center gap-1 w-full",
             colors && `${colors.border} ${colors.bg}`,
-            canDrag && !isLoading && "touch-none",
+            canDrag && !isLoading && "touch-none cursor-grab active:cursor-grabbing",
           )}
+          {...attributes}
+          {...listeners}
         >
           {isLoading ? (
             <InlineLoader size="sm" className="shrink-0" />
           ) : canDrag ? (
-            <span
-              ref={setActivatorNodeRef}
-              {...listeners}
-              {...attributes}
-              className="cursor-grab active:cursor-grabbing shrink-0"
-            >
-              <GripVertical className="w-3 h-3 text-muted-foreground" />
-            </span>
+            <GripVertical className="w-3 h-3 text-muted-foreground shrink-0" />
           ) : null}
           {playerNumber !== undefined && (
             <span className="text-[10px] font-bold text-muted-foreground mr-0.5">{playerNumber}.</span>
