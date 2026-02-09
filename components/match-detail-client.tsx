@@ -33,6 +33,7 @@ import {
   deleteMatch,
   randomizeTeams,
   assignTeam,
+  assignTeamNumber,
   updateMatchField,
   resetTeamsToNoTeam,
   addMatchAdmin,
@@ -379,6 +380,32 @@ export function MatchDetailClient({
     }
     // On success, keep the override - it will be consistent with the revalidated data
     // and will be cleaned up when participants prop changes
+  }
+
+  async function handleAssignTeamNumber(participantId: number, teamNumber: number | null) {
+    setOptimisticOverrides(prev => ({ ...prev, [participantId]: { team: null } }))
+    setLoadingParticipantIds(prev => {
+      const next = new Set(prev)
+      next.add(participantId)
+      return next
+    })
+
+    const result = await assignTeamNumber(match.id, participantId, teamNumber)
+
+    setLoadingParticipantIds(prev => {
+      const next = new Set(prev)
+      next.delete(participantId)
+      return next
+    })
+
+    if (result?.error) {
+      setOptimisticOverrides(prev => {
+        const next = { ...prev }
+        delete next[participantId]
+        return next
+      })
+      showError('Error al intentar mover jugador a equipo', result.error)
+    }
   }
 
   async function handlePromoteToPlayer(participantId: number) {
@@ -1028,6 +1055,7 @@ export function MatchDetailClient({
               isAdmin={isAdmin}
               isPast={isPast}
               onAssignTeam={handleAssignTeam}
+              onAssignTeamNumber={handleAssignTeamNumber}
               onPromoteToPlayer={handlePromoteToPlayer}
               onDemoteToSubstitute={handleDemoteToSubstitute}
               teamCount={match.team_count}
