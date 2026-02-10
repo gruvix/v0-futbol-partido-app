@@ -228,7 +228,11 @@ export function TeamAssignment({
           className={cn(
             "py-1 px-2 md:py-1.5 md:px-3 transition-all inline-flex w-full overflow-hidden max-w-full flex-col items-start gap-0.5 md:flex-row md:items-center md:gap-1",
             colors && `${colors.border} ${colors.bg}`,
-            canDrag && !isLoading && "touch-none cursor-grab active:cursor-grabbing",
+            // Ensure all participants show the hand cursor (clickable) on hover.
+            // When drag is enabled, keep grab cursor to communicate drag affordance.
+            canDrag && !isLoading
+              ? "touch-none cursor-grab active:cursor-grabbing"
+              : "cursor-pointer",
           )}
           {...attributes}
           {...listeners}
