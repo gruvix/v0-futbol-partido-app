@@ -21,6 +21,7 @@ interface MatchCardProps {
   currentUserId: number
   isPast?: boolean
   isRegistered?: boolean
+  borderVariant?: 'default' | 'registered' | 'nonRegistered'
 }
 
 const locationLabels: Record<string, string> = {
@@ -29,10 +30,19 @@ const locationLabels: Record<string, string> = {
   OTRO: 'Otro',
 }
 
-export function MatchCard({ match, currentUserId, isPast, isRegistered }: MatchCardProps) {
+export function MatchCard({
+  match,
+  currentUserId,
+  isPast,
+  isRegistered,
+  borderVariant,
+}: MatchCardProps) {
   const date = new Date(match.date_time)
   const isCreator = match.created_by_user_id === currentUserId
   const registered = isRegistered ?? match.is_registered ?? false
+
+  const resolvedBorderVariant: MatchCardProps['borderVariant'] =
+    borderVariant ?? (registered ? 'registered' : 'nonRegistered')
 
   const dayNames = ['Dom', 'Lun', 'Mar', 'Mie', 'Jue', 'Vie', 'Sab']
   const monthNames = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic']
@@ -54,7 +64,8 @@ export function MatchCard({ match, currentUserId, isPast, isRegistered }: MatchC
     <Link href={`/dashboard/partido/${match.id}`}>
       <Card className={cn(
         'transition-all hover:shadow-md hover:border-primary/30',
-        registered && 'border-golden hover:border-golden',
+        resolvedBorderVariant === 'registered' && 'border-golden hover:border-golden',
+        resolvedBorderVariant === 'nonRegistered' && 'border-primary/40 hover:border-primary/60',
         isPast && 'opacity-60'
       )}>
         <CardContent className="flex items-center gap-4 p-4">

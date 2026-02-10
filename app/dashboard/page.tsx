@@ -22,7 +22,7 @@ interface Match {
 async function getDashboardMatches(userId: number): Promise<Match[]> {
   // Dashboard should not send past matches (before today). Past matches will live in a future section.
   // Privacy rule: private matches are only visible to registered users.
-  // Old matches rule: exclude anything before today's date (local server date, at midnight).
+  // Old matches rule: include up to 1 week in the past (local server date, at midnight).
   const matches = await sql`
     SELECT
       m.id,
@@ -43,7 +43,7 @@ async function getDashboardMatches(userId: number): Promise<Match[]> {
     JOIN users u ON m.created_by_user_id = u.id
     LEFT JOIN match_participants mp_all ON m.id = mp_all.match_id
     WHERE
-      m.date_time >= date_trunc('day', NOW())
+      m.date_time >= (date_trunc('day', NOW()) - INTERVAL '7 days')
       AND (
         m.is_public = true
         OR EXISTS (
@@ -69,8 +69,14 @@ export default async function DashboardPage() {
 
   const matches = await getDashboardMatches(session.userId)
 
-  const registeredMatches = matches.filter(m => m.is_registered)
-  const otherPublicMatches = matches.filter(m => !m.is_registered && m.is_public)
+  const todayMidnight = new Date()
+  todayMidnight.setHours(0, 0, 0, 0)
+
+  const upcomingMatches = matches.filter(m => new Date(m.date_time) >= todayMidnight)
+  const pastWeekMatches = matches.filter(m => new Date(m.date_time) < todayMidnight)
+
+  const registeredMatches = upcomingMatches.filter(m => m.is_registered)
+  const otherPublicMatches = upcomingMatches.filter(m => !m.is_registered && m.is_public)
 
   return (
     <div className="flex flex-col gap-6">
@@ -92,7 +98,7 @@ export default async function DashboardPage() {
           </Link>
         </div>
 
-        {registeredMatches.length === 0 && otherPublicMatches.length === 0 ? (
+        {registeredMatches.length === 0 && otherPublicMatches.length === 0 && pastWeekMatches.length === 0 ? (
           <Card>
             <CardContent className="flex flex-col items-center justify-center py-12 gap-4">
               <Calendar className="w-12 h-12 text-muted-foreground" />
@@ -131,6 +137,23 @@ export default async function DashboardPage() {
                       match={match}
                       currentUserId={session.userId}
                       isRegistered={match.is_registered}
+                    />
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {pastWeekMatches.length > 0 && (
+              <div className="flex flex-col gap-3">
+                <h2 className="text-lg font-semibold text-muted-foreground">Partidos anteriores (últimos 7 días)</h2>
+                <div className="grid gap-3 opacity-90">
+                  {pastWeekMatches.map((match) => (
+                    <MatchCard
+                      key={match.id}
+                      match={match}
+                      currentUserId={session.userId}
+                      isPast
+                      borderVariant="default"
                     />
                   ))}
                 </div>
