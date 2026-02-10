@@ -15,58 +15,68 @@ interface Match {
   created_by_user_id: number
   creator_name: string
   participant_count: number
+  is_public: boolean
+  is_registered: boolean
 }
 
-async function getUpcomingMatches(): Promise<Match[]> {
+async function getDashboardMatches(userId: number): Promise<Match[]> {
+  // Dashboard should not send past matches (before today). Past matches will live in a future section.
+  // Privacy rule: private matches are only visible to registered users.
+  // Old matches rule: include up to 1 week in the past (local server date, at midnight).
   const matches = await sql`
-    SELECT 
+    SELECT
       m.id,
       m.title,
       m.date_time,
       m.location_type,
       m.location_custom,
       m.created_by_user_id,
+      m.is_public,
       u.name as creator_name,
-      COUNT(mp.id)::int as participant_count
+      COUNT(mp_all.id)::int as participant_count,
+      EXISTS (
+        SELECT 1
+        FROM match_participants mp_me
+        WHERE mp_me.match_id = m.id AND mp_me.user_id = ${userId}
+      ) as is_registered
     FROM matches m
     JOIN users u ON m.created_by_user_id = u.id
-    LEFT JOIN match_participants mp ON m.id = mp.match_id
-    WHERE m.date_time >= NOW()
+    LEFT JOIN match_participants mp_all ON m.id = mp_all.match_id
+    WHERE
+      m.date_time >= (date_trunc('day', NOW()) - INTERVAL '7 days')
+      AND (
+        m.is_public = true
+        OR EXISTS (
+          SELECT 1
+          FROM match_participants mp_me
+          WHERE mp_me.match_id = m.id AND mp_me.user_id = ${userId}
+        )
+      )
     GROUP BY m.id, u.name
     ORDER BY m.date_time ASC
-    LIMIT 10
+    LIMIT 20
   `
-  return matches as Match[]
-}
 
-async function getPastMatches(): Promise<Match[]> {
-  const matches = await sql`
-    SELECT 
-      m.id,
-      m.title,
-      m.date_time,
-      m.location_type,
-      m.location_custom,
-      m.created_by_user_id,
-      u.name as creator_name,
-      COUNT(mp.id)::int as participant_count
-    FROM matches m
-    JOIN users u ON m.created_by_user_id = u.id
-    LEFT JOIN match_participants mp ON m.id = mp.match_id
-    WHERE m.date_time < NOW()
-    GROUP BY m.id, u.name
-    ORDER BY m.date_time DESC
-    LIMIT 5
-  `
   return matches as Match[]
 }
 
 export default async function DashboardPage() {
   const session = await getSession()
-  const [upcomingMatches, pastMatches] = await Promise.all([
-    getUpcomingMatches(),
-    getPastMatches(),
-  ])
+  if (!session) {
+    // layout should already protect this, but keep it safe
+    return null
+  }
+
+  const matches = await getDashboardMatches(session.userId)
+
+  const todayMidnight = new Date()
+  todayMidnight.setHours(0, 0, 0, 0)
+
+  const upcomingMatches = matches.filter(m => new Date(m.date_time) >= todayMidnight)
+  const pastWeekMatches = matches.filter(m => new Date(m.date_time) < todayMidnight)
+
+  const registeredMatches = upcomingMatches.filter(m => m.is_registered)
+  const otherPublicMatches = upcomingMatches.filter(m => !m.is_registered && m.is_public)
 
   return (
     <div className="flex flex-col gap-6">
@@ -79,7 +89,7 @@ export default async function DashboardPage() {
 
       <section className="flex flex-col gap-4">
         <div className="flex items-center justify-between">
-          <h2 className="text-lg font-semibold text-foreground">Proximos partidos</h2>
+          <h2 className="text-lg font-semibold text-foreground">Tus próximos partidos</h2>
           <Link href="/dashboard/nuevo">
             <Button size="sm" variant="outline" className="gap-2 bg-transparent">
               <Plus className="w-4 h-4" />
@@ -88,7 +98,7 @@ export default async function DashboardPage() {
           </Link>
         </div>
 
-        {upcomingMatches.length === 0 ? (
+        {registeredMatches.length === 0 && otherPublicMatches.length === 0 && pastWeekMatches.length === 0 ? (
           <Card>
             <CardContent className="flex flex-col items-center justify-center py-12 gap-4">
               <Calendar className="w-12 h-12 text-muted-foreground" />
@@ -105,33 +115,53 @@ export default async function DashboardPage() {
             </CardContent>
           </Card>
         ) : (
-          <div className="grid gap-3">
-            {upcomingMatches.map((match) => (
-              <MatchCard 
-                key={match.id} 
-                match={match} 
-                currentUserId={session?.userId || 0}
-              />
-            ))}
+          <div className="flex flex-col gap-6">
+            <div className="grid gap-3">
+              {registeredMatches.map((match) => (
+                <MatchCard
+                  key={match.id}
+                  match={match}
+                  currentUserId={session.userId}
+                  isRegistered={match.is_registered}
+                />
+              ))}
+            </div>
+
+            {otherPublicMatches.length > 0 && (
+              <div className="flex flex-col gap-3">
+                <h2 className="text-lg font-semibold text-muted-foreground">Otros partidos</h2>
+                <div className="grid gap-3 opacity-90">
+                  {otherPublicMatches.map((match) => (
+                    <MatchCard
+                      key={match.id}
+                      match={match}
+                      currentUserId={session.userId}
+                      isRegistered={match.is_registered}
+                    />
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {pastWeekMatches.length > 0 && (
+              <div className="flex flex-col gap-3">
+                <h2 className="text-lg font-semibold text-muted-foreground">Partidos anteriores (últimos 7 días)</h2>
+                <div className="grid gap-3 opacity-90">
+                  {pastWeekMatches.map((match) => (
+                    <MatchCard
+                      key={match.id}
+                      match={match}
+                      currentUserId={session.userId}
+                      isPast
+                      borderVariant="default"
+                    />
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         )}
       </section>
-
-      {pastMatches.length > 0 && (
-        <section className="flex flex-col gap-4">
-          <h2 className="text-lg font-semibold text-foreground text-muted-foreground">Partidos pasados</h2>
-          <div className="grid gap-3 opacity-70">
-            {pastMatches.map((match) => (
-              <MatchCard 
-                key={match.id} 
-                match={match} 
-                currentUserId={session?.userId || 0}
-                isPast
-              />
-            ))}
-          </div>
-        </section>
-      )}
     </div>
   )
 }

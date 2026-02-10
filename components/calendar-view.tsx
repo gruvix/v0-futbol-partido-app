@@ -23,7 +23,9 @@ interface MatchSummary {
 }
 
 interface CalendarViewProps {
-  matches: MatchSummary[]
+  initialMatches: MatchSummary[]
+  initialYear: number
+  initialMonth: number
 }
 
 const locationLabels: Record<string, string> = {
@@ -39,11 +41,23 @@ const monthNames = [
 
 const dayNames = ['Dom', 'Lun', 'Mar', 'Mie', 'Jue', 'Vie', 'Sab']
 
-export function CalendarView({ matches }: CalendarViewProps) {
+async function fetchMonthMatches(year: number, month: number): Promise<MatchSummary[]> {
+  const res = await fetch(`/api/matches/calendar?year=${year}&month=${month}`, {
+    cache: 'no-store',
+  })
+  if (!res.ok) return []
+  const data = (await res.json()) as { matches: MatchSummary[] }
+  return data.matches
+}
+
+export function CalendarView({ initialMatches, initialYear, initialMonth }: CalendarViewProps) {
   const today = new Date()
-  const [currentMonth, setCurrentMonth] = useState(today.getMonth())
-  const [currentYear, setCurrentYear] = useState(today.getFullYear())
+  // Use server-provided UTC month/year to avoid client/server timezone mismatches.
+  const [currentMonth, setCurrentMonth] = useState(initialMonth)
+  const [currentYear, setCurrentYear] = useState(initialYear)
   const [selectedDay, setSelectedDay] = useState<number | null>(null)
+  const [matches, setMatches] = useState<MatchSummary[]>(initialMatches)
+  const [isLoadingMonth, setIsLoadingMonth] = useState(false)
 
   const firstDayOfMonth = new Date(currentYear, currentMonth, 1)
   const lastDayOfMonth = new Date(currentYear, currentMonth + 1, 0)
@@ -52,19 +66,55 @@ export function CalendarView({ matches }: CalendarViewProps) {
 
   function prevMonth() {
     if (currentMonth === 0) {
-      setCurrentMonth(11)
-      setCurrentYear(currentYear - 1)
+      const nextMonth = 11
+      const nextYear = currentYear - 1
+      setCurrentMonth(nextMonth)
+      setCurrentYear(nextYear)
+      void (async () => {
+        setIsLoadingMonth(true)
+        const nextMatches = await fetchMonthMatches(nextYear, nextMonth)
+        setMatches(nextMatches)
+        setIsLoadingMonth(false)
+        setSelectedDay(null)
+      })()
     } else {
-      setCurrentMonth(currentMonth - 1)
+      const nextMonth = currentMonth - 1
+      const nextYear = currentYear
+      setCurrentMonth(nextMonth)
+      void (async () => {
+        setIsLoadingMonth(true)
+        const nextMatches = await fetchMonthMatches(nextYear, nextMonth)
+        setMatches(nextMatches)
+        setIsLoadingMonth(false)
+        setSelectedDay(null)
+      })()
     }
   }
 
   function nextMonth() {
     if (currentMonth === 11) {
-      setCurrentMonth(0)
-      setCurrentYear(currentYear + 1)
+      const nextMonth = 0
+      const nextYear = currentYear + 1
+      setCurrentMonth(nextMonth)
+      setCurrentYear(nextYear)
+      void (async () => {
+        setIsLoadingMonth(true)
+        const nextMatches = await fetchMonthMatches(nextYear, nextMonth)
+        setMatches(nextMatches)
+        setIsLoadingMonth(false)
+        setSelectedDay(null)
+      })()
     } else {
-      setCurrentMonth(currentMonth + 1)
+      const nextMonth = currentMonth + 1
+      const nextYear = currentYear
+      setCurrentMonth(nextMonth)
+      void (async () => {
+        setIsLoadingMonth(true)
+        const nextMatches = await fetchMonthMatches(nextYear, nextMonth)
+        setMatches(nextMatches)
+        setIsLoadingMonth(false)
+        setSelectedDay(null)
+      })()
     }
   }
 
@@ -184,6 +234,9 @@ export function CalendarView({ matches }: CalendarViewProps) {
           {/* Upcoming matches list */}
           <div className="mt-6 flex flex-col gap-2">
             <h3 className="text-sm font-semibold text-foreground">Proximos partidos</h3>
+            {isLoadingMonth && (
+              <p className="text-sm text-muted-foreground">Cargando...</p>
+            )}
             {matches.filter(m => new Date(m.date_time) >= today).length === 0 ? (
               <p className="text-sm text-muted-foreground">No hay partidos programados</p>
             ) : (

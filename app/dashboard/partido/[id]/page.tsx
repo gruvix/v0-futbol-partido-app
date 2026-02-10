@@ -115,9 +115,15 @@ export default async function MatchDetailPage({
     notFound()
   }
 
+  // Privacy: private matches are only visible to registered users (or creator/admin).
+  // If a user tries to access a private match by URL without being a participant, treat it as non-existent.
   const isCreator = match.created_by_user_id === session.userId
   const isAdmin = isCreator || admins.some(a => a.user_id === session.userId)
   const userParticipation = participants.find(p => p.user_id === session.userId)
+  const canView = match.is_public || Boolean(userParticipation) || isAdmin
+  if (!canView) {
+    notFound()
+  }
   const isPast = new Date(match.date_time) < new Date()
 
   return (
