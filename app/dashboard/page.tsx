@@ -78,6 +78,11 @@ export default async function DashboardPage() {
   const registeredMatches = upcomingMatches.filter(m => m.is_registered)
   const otherPublicMatches = upcomingMatches.filter(m => !m.is_registered && m.is_public)
 
+  const showNoMatchesCard =
+    registeredMatches.length === 0 && otherPublicMatches.length === 0 && pastWeekMatches.length === 0
+
+  const showJoinSuggestionCard = registeredMatches.length === 0 && otherPublicMatches.length > 0
+
   return (
     <div className="flex flex-col gap-6">
       <div className="flex items-center justify-between">
@@ -98,7 +103,7 @@ export default async function DashboardPage() {
           </Link>
         </div>
 
-        {registeredMatches.length === 0 && otherPublicMatches.length === 0 && pastWeekMatches.length === 0 ? (
+        {showNoMatchesCard ? (
           <Card>
             <CardContent className="flex flex-col items-center justify-center py-12 gap-4">
               <Calendar className="w-12 h-12 text-muted-foreground" />
@@ -116,6 +121,28 @@ export default async function DashboardPage() {
           </Card>
         ) : (
           <div className="flex flex-col gap-6">
+            {showJoinSuggestionCard && (
+              <Card>
+                <CardContent className="flex flex-col gap-3 py-6">
+                  <div className="flex items-start justify-between gap-4">
+                    <div className="flex flex-col gap-1">
+                      <p className="font-medium text-foreground">Todavía no estás anotado en ningún partido</p>
+                      <p className="text-sm text-muted-foreground">
+                        Abajo tenés partidos disponibles en <span className="font-medium">“Otros partidos”</span>.
+                        Sumate a uno o creá el tuyo.
+                      </p>
+                    </div>
+                    <Link href="/dashboard/nuevo" className="shrink-0">
+                      <Button size="sm" className="gap-2">
+                        <Plus className="w-4 h-4" />
+                        Crear partido
+                      </Button>
+                    </Link>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+
             <div className="grid gap-3">
               {registeredMatches.map((match) => (
                 <MatchCard
