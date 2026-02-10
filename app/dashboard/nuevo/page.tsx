@@ -12,6 +12,14 @@ import { createMatch } from '@/app/actions/matches'
 import { getCurrentUser } from '@/app/actions/auth'
 import { ArrowLeft, Calendar, Clock, MapPin, Globe, Lock, Users, Pencil, ChevronLeft, ChevronRight } from 'lucide-react'
 import { Switch } from '@/components/ui/switch'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { FieldsAvailabilityCompact } from "@/components/fields/fields-availability-compact";
 import Link from 'next/link'
 import { useActionLoader } from '@/components/football-loader'
 import { useErrorToast } from '@/components/error-toast-provider'
@@ -53,6 +61,7 @@ export default function NuevoPartidoPage() {
   const [invitesPerPlayer, setInvitesPerPlayer] = useState<number | null>(null) // null = unlimited
   const [userName, setUserName] = useState('')
   const [weekOffset, setWeekOffset] = useState(0) // 0 = this week, 1 = next week, etc.
+  const [isAvailabilityOpen, setIsAvailabilityOpen] = useState<boolean>(false)
   const router = useRouter()
   const { showLoader, hideLoader } = useActionLoader()
   const { showError } = useErrorToast()
@@ -302,32 +311,92 @@ export default function NuevoPartidoPage() {
                 onValueChange={setLocationType}
                 className="flex flex-col gap-2"
               >
-                <div className={`flex items-center gap-3 p-3 rounded-lg border-2 transition-all cursor-pointer ${
-                  locationType === 'TERRAZAS' ? 'border-primary bg-primary/10' : 'border-border hover:border-primary/50'
-                }`}>
-                  <RadioGroupItem value="TERRAZAS" id="terrazas" />
-                  <Label htmlFor="terrazas" className="cursor-pointer flex-1 font-normal">
-                    Terrazas
-                  </Label>
+                <div
+                  className={`flex flex-col gap-2 p-3 rounded-lg border-2 transition-all cursor-pointer ${
+                    locationType === 'TERRAZAS'
+                      ? 'border-primary bg-primary/10'
+                      : 'border-border hover:border-primary/50'
+                  }`}
+                >
+                  <div className="flex items-center gap-3">
+                    <RadioGroupItem value="TERRAZAS" id="terrazas" />
+                    <Label htmlFor="terrazas" className="cursor-pointer flex-1 font-normal">
+                      Terrazas
+                    </Label>
+                  </div>
+
+                  {locationType === 'TERRAZAS' ? (
+                    <div className="flex items-center justify-between gap-3 pl-6">
+                      <p className="text-xs text-muted-foreground">
+                        Mirá los horarios disponibles
+                      </p>
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        size="sm"
+                        onClick={() => setIsAvailabilityOpen(true)}
+                        className="h-8 border border-primary text-primary hover:bg-primary/10"
+                      >
+                        Ver disponibilidad
+                      </Button>
+                    </div>
+                  ) : null}
                 </div>
-                <div className={`flex items-center gap-3 p-3 rounded-lg border-2 transition-all cursor-pointer ${
-                  locationType === 'FENIX' ? 'border-primary bg-primary/10' : 'border-border hover:border-primary/50'
-                }`}>
-                  <RadioGroupItem value="FENIX" id="fenix" />
-                  <Label htmlFor="fenix" className="cursor-pointer flex-1 font-normal">
-                    Fenix
-                  </Label>
+
+                <div
+                  className={`flex flex-col gap-2 p-3 rounded-lg border-2 transition-all cursor-pointer ${
+                    locationType === 'FENIX'
+                      ? 'border-primary bg-primary/10'
+                      : 'border-border hover:border-primary/50'
+                  }`}
+                >
+                  <div className="flex items-center gap-3">
+                    <RadioGroupItem value="FENIX" id="fenix" />
+                    <Label htmlFor="fenix" className="cursor-pointer flex-1 font-normal">
+                      Fenix
+                    </Label>
+                  </div>
+                  {locationType === 'FENIX' ? (
+                    <p className="text-xs text-muted-foreground pl-6">
+                      Horarios no disponibles
+                    </p>
+                  ) : null}
                 </div>
-                <div className={`flex items-center gap-3 p-3 rounded-lg border-2 transition-all cursor-pointer ${
-                  locationType === 'OTRO' ? 'border-primary bg-primary/10' : 'border-border hover:border-primary/50'
-                }`}>
-                  <RadioGroupItem value="OTRO" id="otro" />
-                  <Label htmlFor="otro" className="cursor-pointer flex-1 font-normal">
-                    Otra ubicacion
-                  </Label>
+                <div
+                  className={`flex flex-col gap-2 p-3 rounded-lg border-2 transition-all cursor-pointer ${
+                    locationType === 'OTRO'
+                      ? 'border-primary bg-primary/10'
+                      : 'border-border hover:border-primary/50'
+                  }`}
+                >
+                  <div className="flex items-center gap-3">
+                    <RadioGroupItem value="OTRO" id="otro" />
+                    <Label htmlFor="otro" className="cursor-pointer flex-1 font-normal">
+                      Otra ubicacion
+                    </Label>
+                  </div>
+                  {locationType === 'OTRO' ? (
+                    <p className="text-xs text-muted-foreground pl-6">
+                      Horarios no disponibles
+                    </p>
+                  ) : null}
                 </div>
               </RadioGroup>
             </div>
+
+            <Dialog open={isAvailabilityOpen} onOpenChange={setIsAvailabilityOpen}>
+              <DialogContent className="p-4 sm:max-w-xl">
+                <DialogHeader className="gap-1">
+                  <DialogTitle>Disponibilidad</DialogTitle>
+                  <DialogDescription>
+                    Terrazas — versión compacta
+                  </DialogDescription>
+                </DialogHeader>
+                <div className="max-h-[70vh] overflow-auto pr-1">
+                  <FieldsAvailabilityCompact complexId="terrazas" hideTitle />
+                </div>
+              </DialogContent>
+            </Dialog>
 
             {locationType === 'OTRO' && (
               <div className="flex flex-col gap-2">
