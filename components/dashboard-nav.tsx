@@ -5,7 +5,7 @@ import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { logout } from '@/app/actions/auth'
-import { Calendar, Users, Plus, LogOut, Home } from 'lucide-react'
+import { Calendar, Users, Plus, LogOut, Home, MapPin } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { LoadingOverlay } from '@/components/football-loader'
 
@@ -20,6 +20,7 @@ export function DashboardNav({ userName }: DashboardNavProps) {
   const navItems = [
     { href: '/dashboard', label: 'Partidos', icon: Home },
     { href: '/dashboard/calendario', label: 'Calendario', icon: Calendar },
+    { href: '/dashboard/canchas', label: 'Canchas', icon: MapPin },
     { href: '/dashboard/jugadores', label: 'Jugadores', icon: Users },
   ]
 

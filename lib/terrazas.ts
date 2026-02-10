@@ -2,6 +2,8 @@ export interface SlotAvailability {
   time: string
   available: boolean
   price?: number
+  /** Optional: which courts are available for this time (if we can infer it) */
+  availableFieldNames?: string[]
 }
 
 /**
@@ -85,6 +87,13 @@ function extractSlots(payload: unknown): SlotAvailability[] {
   const results: SlotAvailability[] = []
   const visited = new WeakSet<object>()
 
+  // First, attempt the richest/most stable extraction: available_courts -> available_slots
+  // This gives us court-per-time availability (needed for the UI like: "03:00 - Cancha 1,2,5").
+  const fromCourts = extractSlotsFromAvailableCourts(payload)
+  if (fromCourts.length > 0) {
+    return dedupeSlots(mergeSlotLists(results, fromCourts))
+  }
+
   const walk = (node: unknown) => {
     if (!node || typeof node !== 'object') return
     if (visited.has(node as object)) return
@@ -128,6 +137,89 @@ function extractSlots(payload: unknown): SlotAvailability[] {
 
   walk(payload)
   return results
+}
+
+function mergeSlotLists(a: SlotAvailability[], b: SlotAvailability[]): SlotAvailability[] {
+  return [...a, ...b]
+}
+
+interface AvailableCourtSlot {
+  start?: unknown
+  duration?: unknown
+  price?: unknown
+}
+
+interface AvailableCourt {
+  id?: unknown
+  name?: unknown
+  available_slots?: unknown
+}
+
+function extractSlotsFromAvailableCourts(payload: unknown): SlotAvailability[] {
+  const root = payload as {
+    props?: {
+      pageProps?: {
+        sportclub?: {
+          available_courts?: AvailableCourt[]
+        }
+      }
+    }
+  }
+
+  const courts = root?.props?.pageProps?.sportclub?.available_courts
+  if (!Array.isArray(courts) || courts.length === 0) return []
+
+  // Map: time -> set of court names
+  const byTime = new Map<string, Set<string>>()
+  const priceByTime = new Map<string, number>()
+
+  for (const court of courts) {
+    const courtName = typeof court?.name === 'string' ? court.name : null
+    if (!courtName) continue
+
+    const slots = (court as AvailableCourt)?.available_slots
+    if (!Array.isArray(slots)) continue
+
+    for (const slot of slots as AvailableCourtSlot[]) {
+      const start = typeof slot?.start === 'string' ? slot.start : null
+      if (!start) continue
+      const dt = new Date(start)
+      if (Number.isNaN(dt.getTime())) continue
+      const time = `${String(dt.getHours()).padStart(2, '0')}:${String(dt.getMinutes()).padStart(2, '0')}`
+
+      const set = byTime.get(time) ?? new Set<string>()
+      set.add(courtName)
+      byTime.set(time, set)
+
+      const price = extractPriceFromCourtSlot(slot)
+      if (price !== undefined) {
+        // keep the minimum price seen for the time, if multiple courts have different prices
+        const existing = priceByTime.get(time)
+        if (existing === undefined || price < existing) priceByTime.set(time, price)
+      }
+    }
+  }
+
+  const results: SlotAvailability[] = Array.from(byTime.entries())
+    .map(([time, courtsSet]) => ({
+      time,
+      available: courtsSet.size > 0,
+      price: priceByTime.get(time),
+      availableFieldNames: Array.from(courtsSet.values()).sort((a, b) => a.localeCompare(b)),
+    }))
+    .sort((a, b) => a.time.localeCompare(b.time))
+
+  return results
+}
+
+function extractPriceFromCourtSlot(slot: AvailableCourtSlot): number | undefined {
+  // Known shape: price: { cents: 7000000, currency: 'ARS' }
+  const price = slot.price as { cents?: unknown } | undefined
+  if (price && typeof price === 'object' && typeof price.cents === 'number') {
+    // cents in payload appear to have 2 decimals implied; convert to currency unit.
+    return price.cents / 100
+  }
+  return undefined
 }
 
 function hasTimeLike(record: Record<string, unknown>) {
@@ -203,10 +295,29 @@ function dedupeSlots(slots: SlotAvailability[]): SlotAvailability[] {
       const shouldReplaceAvailability = !existing.available && slot.available
       const shouldMergePrice = slot.price !== undefined && existing.price === undefined
 
+      const mergedAvailableFieldNames = mergeFieldNames(
+        existing.availableFieldNames,
+        slot.availableFieldNames
+      )
+
       if (shouldReplaceAvailability || shouldMergePrice) {
-        seen.set(slot.time, { ...existing, ...slot })
+        seen.set(slot.time, { ...existing, ...slot, availableFieldNames: mergedAvailableFieldNames })
+      } else if (mergedAvailableFieldNames) {
+        // Even if we don't replace other fields, we still want to union the court list.
+        seen.set(slot.time, { ...existing, availableFieldNames: mergedAvailableFieldNames })
       }
     }
   }
   return Array.from(seen.values()).sort((a, b) => a.time.localeCompare(b.time))
+}
+
+function mergeFieldNames(
+  a: string[] | undefined,
+  b: string[] | undefined
+): string[] | undefined {
+  if (!a && !b) return undefined
+  const set = new Set<string>()
+  for (const name of a ?? []) set.add(name)
+  for (const name of b ?? []) set.add(name)
+  return Array.from(set.values()).sort((x, y) => x.localeCompare(y))
 }
