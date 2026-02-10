@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { DateNavigator } from '@/components/fields/date-navigator'
+import { FootballLoader } from '@/components/football-loader'
 
 interface NormalizedSlotAvailability {
   time: string
@@ -42,12 +43,15 @@ export function FieldsSection() {
   const [date, setDate] = useState<string>(todayYYYYMMDD())
   const [data, setData] = useState<NormalizedAvailabilityResponse | null>(null)
   const [isLoading, setIsLoading] = useState<boolean>(true)
+  const [hasLoadedOnce, setHasLoadedOnce] = useState<boolean>(false)
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
     let cancelled = false
 
     async function run() {
+      // Clear old data so we don't show stale availability when changing dates
+      setData(null)
       setIsLoading(true)
       setError(null)
       try {
@@ -58,7 +62,10 @@ export function FieldsSection() {
           throw new Error(`HTTP ${res.status}`)
         }
         const json = (await res.json()) as NormalizedAvailabilityResponse
-        if (!cancelled) setData(json)
+        if (!cancelled) {
+          setData(json)
+          setHasLoadedOnce(true)
+        }
       } catch (e) {
         if (!cancelled) setError((e as Error).message)
       } finally {
@@ -74,6 +81,11 @@ export function FieldsSection() {
 
   const complexes = useMemo(() => data?.complexes ?? [], [data])
 
+  // Use the app loader for the initial load and during date transitions.
+  if (isLoading && !hasLoadedOnce) {
+    return <FootballLoader />
+  }
+
   return (
     <div className="flex flex-col gap-4">
       <div>
@@ -84,13 +96,15 @@ export function FieldsSection() {
       <Card>
         <CardContent className="p-4 flex flex-col gap-4">
           <DateNavigator date={date} onChange={setDate} />
-          {isLoading && <p className="text-sm text-muted-foreground">Cargando disponibilidad…</p>}
+          {isLoading && hasLoadedOnce && <p className="text-sm text-muted-foreground">Actualizando…</p>}
           {error && <p className="text-sm text-destructive">Error: {error}</p>}
           {!isLoading && !error && complexes.length === 0 && (
             <p className="text-sm text-muted-foreground">No hay complejos disponibles.</p>
           )}
         </CardContent>
       </Card>
+
+      {isLoading && hasLoadedOnce ? <FootballLoader /> : null}
 
       <div className="flex flex-col gap-4">
         {complexes.map((complex) => (
