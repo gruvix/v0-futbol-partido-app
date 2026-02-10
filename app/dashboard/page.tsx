@@ -116,6 +116,7 @@ export default async function DashboardPage() {
                   key={match.id}
                   match={match}
                   currentUserId={session.userId}
+                  isRegistered={match.is_registered}
                 />
               ))}
             </div>
@@ -129,6 +130,7 @@ export default async function DashboardPage() {
                       key={match.id}
                       match={match}
                       currentUserId={session.userId}
+                      isRegistered={match.is_registered}
                     />
                   ))}
                 </div>
