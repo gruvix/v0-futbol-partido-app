@@ -50,7 +50,7 @@ export async function getSession() {
   if (!token) return null
 
   const sessions = await sql`
-    SELECT s.*, u.id as user_id, u.name, u.phone_last_four, u.is_approved
+    SELECT s.*, u.id as user_id, u.name, u.phone_last_four, u.is_approved, u.admin
     FROM sessions s
     JOIN users u ON s.user_id = u.id
     WHERE s.token = ${token} AND s.expires_at > NOW()
@@ -63,6 +63,7 @@ export async function getSession() {
     name: sessions[0].name,
     phoneLast4: sessions[0].phone_last_four,
     isApproved: sessions[0].is_approved,
+    admin: sessions[0].admin,
   }
 }
 

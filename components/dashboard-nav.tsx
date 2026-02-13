@@ -5,15 +5,16 @@ import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { logout } from '@/app/actions/auth'
-import { Calendar, Users, Plus, LogOut, Home } from 'lucide-react'
+import { Calendar, Users, Plus, LogOut, Home, BarChart3 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { LoadingOverlay } from '@/components/football-loader'
 
 interface DashboardNavProps {
   userName: string
+  isAdmin: boolean
 }
 
-export function DashboardNav({ userName }: DashboardNavProps) {
+export function DashboardNav({ userName, isAdmin }: DashboardNavProps) {
   const pathname = usePathname()
   const [loggingOut, setLoggingOut] = useState(false)
 
@@ -21,6 +22,7 @@ export function DashboardNav({ userName }: DashboardNavProps) {
     { href: '/dashboard', label: 'Partidos', icon: Home },
     { href: '/dashboard/calendario', label: 'Calendario', icon: Calendar },
     { href: '/dashboard/jugadores', label: 'Jugadores', icon: Users },
+    ...(isAdmin ? [{ href: '/dashboard/stats', label: 'Stats', icon: BarChart3 }] : []),
   ]
 
   async function handleLogout() {

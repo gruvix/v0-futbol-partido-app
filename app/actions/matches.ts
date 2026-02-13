@@ -9,6 +9,105 @@ function computedMaxPlayers(teamCount: number, teamSize: number): number {
   return Math.max(1, teamCount) * Math.max(1, teamSize)
 }
 
+async function autoBalanceTeamsIfFull(matchId: number) {
+  const matchRows = await sql`
+    SELECT team_count, team_size, max_players
+    FROM matches
+    WHERE id = ${matchId}
+  `
+  const match = matchRows[0]
+  if (!match) return
+
+  const teamCount = Number(match.team_count || 0)
+  const teamSize = Number(match.team_size || 0)
+  const maxPlayers = Number(match.max_players || 0)
+  if (teamCount < 2 || teamSize <= 0 || maxPlayers <= 0) return
+
+  const players = await sql`
+    SELECT
+      mp.id,
+      mp.user_id,
+      mp.team,
+      mp.team_number,
+      (
+        COALESCE(s.pac, 5) +
+        COALESCE(s.sho, 5) +
+        COALESCE(s.pas, 5) +
+        COALESCE(s.dri, 5) +
+        COALESCE(s.def, 5) +
+        COALESCE(s.phy, 5)
+      )::float / 6.0 AS overall
+    FROM match_participants mp
+    LEFT JOIN stats s ON s.user_id = mp.user_id
+    WHERE mp.match_id = ${matchId} AND mp.role = 'PLAYER'
+  `
+
+  if (players.length !== maxPlayers) return
+
+  const sorted = [...players].sort((a, b) => Number(b.overall) - Number(a.overall))
+  const teams: Array<{ total: number; members: number[] }> = Array.from(
+    { length: teamCount },
+    () => ({ total: 0, members: [] })
+  )
+
+  for (const player of sorted) {
+    let targetTeam = -1
+    for (let i = 0; i < teamCount; i++) {
+      if (teams[i].members.length >= teamSize) continue
+      if (targetTeam === -1 || teams[i].total < teams[targetTeam].total) {
+        targetTeam = i
+      }
+    }
+    if (targetTeam === -1) break
+    teams[targetTeam].members.push(player.id)
+    teams[targetTeam].total += Number(player.overall)
+  }
+
+  const desiredByParticipantId = new Map<number, { team: 'A' | 'B' | null; teamNumber: number | null }>()
+  for (let i = 0; i < teams.length; i++) {
+    for (const participantId of teams[i].members) {
+      const teamNumber = i + 1
+      desiredByParticipantId.set(participantId, {
+        team: teamCount === 2 ? (teamNumber === 1 ? 'A' : 'B') : null,
+        teamNumber: teamCount === 2 ? null : teamNumber,
+      })
+    }
+  }
+
+  const alreadyBalanced = players.every((player) => {
+    const desired = desiredByParticipantId.get(player.id)
+    if (!desired) return false
+    return player.team === desired.team && player.team_number === desired.teamNumber
+  })
+  if (alreadyBalanced) return
+
+  await sql`
+    UPDATE match_participants
+    SET team = NULL, team_number = NULL
+    WHERE match_id = ${matchId} AND role = 'PLAYER'
+  `
+
+  for (let i = 0; i < teams.length; i++) {
+    for (const participantId of teams[i].members) {
+      const teamNumber = i + 1
+      if (teamCount === 2) {
+        const team = teamNumber === 1 ? 'A' : 'B'
+        await sql`
+          UPDATE match_participants
+          SET team = ${team}, team_number = NULL
+          WHERE id = ${participantId} AND match_id = ${matchId}
+        `
+      } else {
+        await sql`
+          UPDATE match_participants
+          SET team = NULL, team_number = ${teamNumber}
+          WHERE id = ${participantId} AND match_id = ${matchId}
+        `
+      }
+    }
+  }
+}
+
 export async function createMatch(formData: FormData) {
   const session = await getSession()
   if (!session) {
@@ -101,6 +200,10 @@ export async function joinMatch(matchId: number, role: 'PLAYER' | 'SUBSTITUTE' |
         INSERT INTO match_participants (match_id, user_id, role)
         VALUES (${matchId}, ${session.userId}, ${role})
       `
+    }
+
+    if (role === 'PLAYER') {
+      await autoBalanceTeamsIfFull(matchId)
     }
 
     revalidatePath(`/dashboard/partido/${matchId}`)
@@ -320,6 +423,10 @@ export async function invitePlayer(matchId: number, userId: number, role: 'PLAYE
       INSERT INTO match_participants (match_id, user_id, role)
       VALUES (${matchId}, ${userId}, ${role})
     `
+
+    if (role === 'PLAYER') {
+      await autoBalanceTeamsIfFull(matchId)
+    }
 
     // Track the invite
     await sql`
@@ -617,6 +724,9 @@ export async function changeParticipantRole(matchId: number, participantId: numb
       SET role = ${newRole}, team = NULL, team_number = NULL
       WHERE id = ${participantId} AND match_id = ${matchId}
     `
+    if (newRole === 'PLAYER') {
+      await autoBalanceTeamsIfFull(matchId)
+    }
     revalidatePath(`/dashboard/partido/${matchId}`)
     return { success: true }
   } catch (error) {
