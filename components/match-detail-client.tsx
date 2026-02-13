@@ -1,12 +1,13 @@
 'use client'
 
-import { useEffect, useState, type KeyboardEvent } from 'react'
+import { useCallback, useEffect, useRef, useState, type KeyboardEvent } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
+import { Textarea } from '@/components/ui/textarea'
 import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
@@ -68,6 +69,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
+import { cn } from '@/lib/utils'
 
 interface Match {
   id: number
@@ -294,6 +296,9 @@ export function MatchDetailClient({
     return Object.fromEntries(entries)
   })
 
+  const noteTextareaRefs = useRef<Record<number, HTMLTextAreaElement | null>>({})
+  const [noteIsMultiline, setNoteIsMultiline] = useState<Record<number, boolean>>({})
+
   const [notesSavingIds, setNotesSavingIds] = useState<Set<number>>(new Set())
   const [paidSavingIds, setPaidSavingIds] = useState<Set<number>>(new Set())
 
@@ -305,6 +310,52 @@ export function MatchDetailClient({
     const entries = activePlayersForPayments.map(p => [p.id, p.payment_notes ?? ''] as const)
     setLocalNotes(Object.fromEntries(entries))
   }, [participants, players.length])
+
+  const syncNoteTextareaSize = useCallback((participantId: number, el: HTMLTextAreaElement | null): void => {
+    if (!el) return
+
+    // Auto-grow textarea to fit content (including wrapped lines)
+    el.style.overflowY = 'hidden'
+    el.style.height = '0px'
+    el.style.height = `${el.scrollHeight}px`
+
+    const computed = window.getComputedStyle(el)
+    const lineHeightRaw = Number.parseFloat(computed.lineHeight)
+    const paddingTop = Number.parseFloat(computed.paddingTop)
+    const paddingBottom = Number.parseFloat(computed.paddingBottom)
+    const lineHeight = Number.isFinite(lineHeightRaw) ? lineHeightRaw : 20
+    const singleLineHeight = lineHeight + paddingTop + paddingBottom
+    const isMultiline = el.scrollHeight > singleLineHeight + 1
+
+    setNoteIsMultiline(prev => {
+      if (prev[participantId] === isMultiline) return prev
+      return { ...prev, [participantId]: isMultiline }
+    })
+  }, [])
+
+  // Re-evaluate wrapping on resize (textarea can become multiline just by shrinking the row)
+  useEffect(() => {
+    let rafId: number | null = null
+
+    const onResize = (): void => {
+      if (rafId !== null) {
+        window.cancelAnimationFrame(rafId)
+      }
+      rafId = window.requestAnimationFrame(() => {
+        for (const p of activePlayersForPayments) {
+          syncNoteTextareaSize(p.id, noteTextareaRefs.current[p.id])
+        }
+      })
+    }
+
+    window.addEventListener('resize', onResize)
+    return () => {
+      window.removeEventListener('resize', onResize)
+      if (rafId !== null) {
+        window.cancelAnimationFrame(rafId)
+      }
+    }
+  }, [activePlayersForPayments, syncNoteTextareaSize])
 
   async function handleSaveFieldRentTotal(): Promise<void> {
     const raw = editFieldRentTotal.trim()
@@ -1542,54 +1593,86 @@ export function MatchDetailClient({
                     const currentNote = p.payment_notes ?? ''
                     const draft = localNotes[p.id] ?? ''
                     const hasNoteChanges = draft !== currentNote
+                    const isMultiline = Boolean(noteIsMultiline[p.id])
 
                     return (
                       <div
                         key={p.id}
-                        className="flex items-center gap-2 py-1"
+                        className="py-1"
                       >
-                        <input
-                          type="checkbox"
-                          checked={Boolean(p.has_paid)}
-                          onChange={(e) => handleTogglePaid(p.id, e.target.checked)}
-                          disabled={!isAdmin || isPast || isSavingPaid}
-                          className="h-4 w-4 accent-primary disabled:opacity-50"
-                          aria-label={`Pago de ${p.name}`}
-                        />
+                        <div className="flex items-start gap-2">
+                          <input
+                            type="checkbox"
+                            checked={Boolean(p.has_paid)}
+                            onChange={(e) => handleTogglePaid(p.id, e.target.checked)}
+                            disabled={!isAdmin || isPast || isSavingPaid}
+                            className="h-4 w-4 mt-1 accent-primary disabled:opacity-50"
+                            aria-label={`Pago de ${p.name}`}
+                          />
 
-                        <div className="min-w-0 flex items-center gap-1">
-                          <span className="text-sm font-medium truncate">{p.name}</span>
-                          <span className="text-sm text-muted-foreground truncate">({p.phone_last_four})</span>
-                        </div>
+                          <div
+                            className={cn(
+                              'min-w-0 flex-1 flex flex-col gap-1',
+                              // Small screens: always stacked. Larger screens: keep inline unless the note wraps.
+                              !isMultiline && 'sm:flex-row sm:items-center sm:gap-2',
+                            )}
+                          >
+                            <div className="min-w-0 flex items-center gap-1">
+                              <span className="text-sm font-medium truncate">{p.name}</span>
+                              <span className="text-sm text-muted-foreground truncate">({p.phone_last_four})</span>
+                            </div>
 
-                        <div className="flex items-center gap-2 flex-1 min-w-0">
-                          <span className="text-xs text-muted-foreground whitespace-nowrap">notas:</span>
-                          <div className="relative flex-1 min-w-0">
-                            <Input
-                              value={draft}
-                              onChange={(e) => {
-                                const next = e.target.value
-                                setLocalNotes(prev => ({ ...prev, [p.id]: next }))
-                              }}
-                              onKeyDown={(e: KeyboardEvent<HTMLInputElement>) => {
-                                if (e.key !== 'Enter') return
-                                if (!canEditThisNote || isSavingNote || !hasNoteChanges) return
-                                e.preventDefault()
-                                void handleSaveNotes(p.id)
-                              }}
-                              placeholder=""
-                              disabled={!canEditThisNote || isSavingNote}
-                              className="h-8 pr-9 placeholder:text-muted-foreground/30"
-                            />
-                            <button
-                              type="button"
-                              aria-label={`Guardar notas de ${p.name}`}
-                              onClick={() => handleSaveNotes(p.id)}
-                              disabled={!canEditThisNote || isSavingNote || !hasNoteChanges}
-                              className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground disabled:opacity-40"
+                            <div
+                              className={cn(
+                                'min-w-0 flex flex-col gap-1',
+                                !isMultiline && 'sm:flex-1 sm:flex-row sm:items-center sm:gap-2',
+                              )}
                             >
-                              {isSavingNote ? <InlineLoader size="sm" /> : <Save className="w-4 h-4" />}
-                            </button>
+                              <span
+                                className={cn(
+                                  'text-xs text-muted-foreground',
+                                  !isMultiline && 'sm:whitespace-nowrap',
+                                )}
+                              >
+                                notas:
+                              </span>
+                              <div className={cn('relative min-w-0', !isMultiline && 'sm:flex-1')}>
+                                <Textarea
+                                  ref={(el) => {
+                                    noteTextareaRefs.current[p.id] = el
+                                    syncNoteTextareaSize(p.id, el)
+                                  }}
+                                  rows={1}
+                                  value={draft}
+                                  onChange={(e) => {
+                                    const next = e.target.value
+                                    setLocalNotes(prev => ({ ...prev, [p.id]: next }))
+                                    syncNoteTextareaSize(p.id, e.currentTarget)
+                                  }}
+                                  onKeyDown={(e: KeyboardEvent<HTMLTextAreaElement>) => {
+                                    if (e.key !== 'Enter') return
+                                    if (!canEditThisNote || isSavingNote || !hasNoteChanges) return
+                                    e.preventDefault()
+                                    void handleSaveNotes(p.id)
+                                  }}
+                                  placeholder=""
+                                  disabled={!canEditThisNote || isSavingNote}
+                                  className="min-h-8 resize-none overflow-hidden pr-9 py-1.5 placeholder:text-muted-foreground/30"
+                                />
+                                <button
+                                  type="button"
+                                  aria-label={`Guardar notas de ${p.name}`}
+                                  onClick={() => handleSaveNotes(p.id)}
+                                  disabled={!canEditThisNote || isSavingNote || !hasNoteChanges}
+                                  className={cn(
+                                    'absolute right-2 text-muted-foreground hover:text-foreground disabled:opacity-40',
+                                    isMultiline ? 'top-2' : 'top-1/2 -translate-y-1/2',
+                                  )}
+                                >
+                                  {isSavingNote ? <InlineLoader size="sm" /> : <Save className="w-4 h-4" />}
+                                </button>
+                              </div>
+                            </div>
                           </div>
                         </div>
                       </div>
