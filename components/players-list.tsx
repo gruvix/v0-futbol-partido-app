@@ -5,11 +5,13 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
 import { Users, Search } from 'lucide-react'
+import { GenderIcon, type Gender } from '@/lib/gender'
 
 interface Player {
   id: number
   name: string
   phone_last_four: string
+  gender: Gender
   matches_played: number
 }
 
@@ -55,6 +57,7 @@ export function PlayersList({ players }: PlayersListProps) {
                 variant="secondary"
                 className="py-2 px-3 flex items-center gap-2"
               >
+                <GenderIcon gender={player.gender} className="w-4 h-4 shrink-0" />
                 <span className="font-medium">{player.name}</span>
                 <span className="text-muted-foreground">({player.phone_last_four})</span>
                 {player.matches_played > 0 && (

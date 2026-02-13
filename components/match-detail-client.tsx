@@ -28,6 +28,7 @@ import {
   UserRoundPlus,
   UserRoundMinus,
 } from 'lucide-react'
+import { GenderIcon, type Gender } from '@/lib/gender'
 import {
   joinMatch,
   leaveMatch,
@@ -91,6 +92,7 @@ interface Participant {
   name: string
   phone_last_four: string
   role: 'PLAYER' | 'SUBSTITUTE'
+  gender: Gender
   team: 'A' | 'B' | null
   team_number: number | null
   // When the viewer is not subscribed to the match, the server does not
@@ -140,7 +142,6 @@ export function MatchDetailClient({
   currentUserId,
 }: MatchDetailClientProps) {
   const [loading, setLoading] = useState<string | null>(null)
-  const [_error, setError] = useState('')
   const [showInviteDialog, setShowInviteDialog] = useState(false)
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
   const [showLastPlayerConfirm, setShowLastPlayerConfirm] = useState(false)
@@ -1717,7 +1718,14 @@ export function MatchDetailClient({
         <DialogContent showCloseButton={false}>
           <DialogHeader className="gap-2">
             <div className="flex items-center justify-between">
-              <DialogTitle className="truncate">{selectedParticipant?.name ?? ''}</DialogTitle>
+              <DialogTitle className="truncate">
+                <span className="inline-flex items-center gap-1">
+                  {selectedParticipant ? (
+                    <GenderIcon gender={selectedParticipant.gender} className="w-4 h-4 shrink-0" />
+                  ) : null}
+                  <span>{selectedParticipant?.name ?? ''}</span>
+                </span>
+              </DialogTitle>
               <button
                 type="button"
                 className="text-muted-foreground hover:text-foreground shrink-0"

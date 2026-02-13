@@ -5,6 +5,7 @@ interface Player {
   id: number
   name: string
   phone_last_four: string
+  gender: 'MALE' | 'FEMALE' | 'OTHER'
   matches_played: number
 }
 
@@ -14,6 +15,7 @@ async function getPlayers(): Promise<Player[]> {
       u.id,
       u.name,
       u.phone_last_four,
+      u.gender,
       COUNT(mp.id)::int as matches_played
     FROM users u
     LEFT JOIN match_participants mp ON u.id = mp.user_id

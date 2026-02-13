@@ -20,6 +20,12 @@ export async function initializeDatabase() {
   } catch {
     // Type already exists
   }
+
+  try {
+    await sql`CREATE TYPE user_gender AS ENUM ('MALE', 'FEMALE', 'OTHER')`
+  } catch {
+    // Type already exists
+  }
   
   try {
     await sql`CREATE TYPE participant_role AS ENUM ('PLAYER', 'SUBSTITUTE')`
@@ -40,6 +46,7 @@ export async function initializeDatabase() {
       name VARCHAR(255) NOT NULL,
       phone_last_four VARCHAR(4) NOT NULL,
       password_hash VARCHAR(255) NOT NULL,
+      gender user_gender NOT NULL DEFAULT 'MALE',
       is_approved BOOLEAN DEFAULT true,
       created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
       updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
@@ -53,6 +60,7 @@ export async function initializeDatabase() {
       name VARCHAR(255) NOT NULL,
       phone_last_four VARCHAR(4) NOT NULL,
       password_hash VARCHAR(255) NOT NULL,
+      gender user_gender NOT NULL DEFAULT 'MALE',
       created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
       UNIQUE(name, phone_last_four)
     )
@@ -114,6 +122,9 @@ export async function initializeDatabase() {
   // Add columns if they don't exist (for existing databases)
   // Note: match_participants might not exist yet, so keep those ALTERs isolated.
   try {
+    await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS gender user_gender NOT NULL DEFAULT 'MALE'`
+    await sql`ALTER TABLE pending_users ADD COLUMN IF NOT EXISTS gender user_gender NOT NULL DEFAULT 'MALE'`
+
     await sql`ALTER TABLE matches ADD COLUMN IF NOT EXISTS title VARCHAR(100)`
     await sql`ALTER TABLE matches ADD COLUMN IF NOT EXISTS emoji VARCHAR(10)`
     await sql`ALTER TABLE matches ADD COLUMN IF NOT EXISTS is_public BOOLEAN DEFAULT true`

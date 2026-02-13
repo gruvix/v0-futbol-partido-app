@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react'
 import { Check, Search, UserPlus } from 'lucide-react'
 
 import { getAllUsers, getInviteCount, invitePlayer } from '@/app/actions/matches'
+import { GenderIcon, type Gender } from '@/lib/gender'
 import { useErrorToast } from '@/components/error-toast-provider'
 import { InlineLoader, useActionLoader } from '@/components/football-loader'
 import { Button } from '@/components/ui/button'
@@ -20,6 +21,7 @@ interface User {
   id: number
   name: string
   phone_last_four: string
+  gender: Gender
 }
 
 interface InvitePlayersDialogProps {
@@ -144,7 +146,10 @@ export function InvitePlayersDialog({
                     className="flex items-center justify-between p-3 rounded-lg border border-border hover:bg-muted/50 transition-colors"
                   >
                     <div>
-                      <p className="font-medium text-foreground">{user.name}</p>
+                      <p className="font-medium text-foreground inline-flex items-center gap-1">
+                        <GenderIcon gender={user.gender} className="w-4 h-4 shrink-0" />
+                        <span>{user.name}</span>
+                      </p>
                       <p className="text-sm text-muted-foreground">****{user.phone_last_four}</p>
                     </div>
                     <Button
