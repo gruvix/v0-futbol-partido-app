@@ -3,21 +3,8 @@
 import { revalidatePath } from 'next/cache'
 import { getSession } from '@/lib/auth'
 import { sql } from '@/lib/db'
-
-export const MIN_STAT_VALUE = 0
-export const MAX_STAT_VALUE = 10
-
-export interface StatsUser {
-  id: number
-  name: string
-  phone_last_four: string
-  pac: number
-  sho: number
-  pas: number
-  dri: number
-  def: number
-  phy: number
-}
+import { MIN_STAT_VALUE, MAX_STAT_VALUE } from '@/lib/stats'
+import type { StatsUser } from '@/lib/stats'
 
 export async function getUsersWithStats(): Promise<{ error?: string; users: StatsUser[] }> {
   const session = await getSession()

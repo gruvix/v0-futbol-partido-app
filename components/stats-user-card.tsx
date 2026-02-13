@@ -3,8 +3,9 @@
 import { useState } from 'react'
 import { Card, CardContent, CardHeader } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
-import { saveUserStats, MIN_STAT_VALUE, MAX_STAT_VALUE } from '@/app/actions/stats'
-import type { StatsUser } from '@/app/actions/stats'
+import { saveUserStats } from '@/app/actions/stats'
+import { MIN_STAT_VALUE, MAX_STAT_VALUE } from '@/lib/stats'
+import type { StatsUser } from '@/lib/stats'
 
 const STAT_FIELDS: Array<{ key: keyof Pick<StatsUser, 'pac' | 'sho' | 'pas' | 'dri' | 'def' | 'phy'>; code: string; label: string }> = [
   { key: 'pac', code: 'PAC', label: 'Pace' },
