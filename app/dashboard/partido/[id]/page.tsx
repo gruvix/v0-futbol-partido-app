@@ -71,6 +71,7 @@ async function getParticipants(matchId: number, includePayments: boolean): Promi
         mp.user_id,
         u.name,
         u.phone_last_four,
+        u.gender,
         CASE WHEN mp.role = 'EXTRA' THEN 'SUBSTITUTE' ELSE mp.role::text END AS role,
         mp.team,
         mp.team_number,
