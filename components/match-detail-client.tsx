@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState, type KeyboardEvent } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
@@ -17,14 +17,16 @@ import {
   Users,
   Shuffle,
   Trash2,
-  UserPlus,
-  UserMinus,
   Share2,
   Globe,
   Lock,
   ChevronLeft,
   ChevronRight,
-  Pencil,
+  Save,
+  Wallet,
+  UserRoundPlus,
+  UserRoundMinus,
+  Signature,
 } from 'lucide-react'
 import {
   joinMatch,
@@ -39,6 +41,9 @@ import {
   addMatchAdmin,
   removeMatchAdmin,
   changeParticipantRole,
+  setParticipantPaymentStatus,
+  updateMatchFieldRentTotal,
+  updateParticipantPaymentNotes,
 } from '@/app/actions/matches'
 import { TeamAssignment } from '@/components/team-assignment'
 import { InvitePlayersDialog } from '@/components/invite-players-dialog'
@@ -77,6 +82,7 @@ interface Match {
   team_size: number
   max_players: number
   invites_per_player: number | null
+  field_rent_total: number | null
 }
 
 interface Participant {
@@ -84,9 +90,11 @@ interface Participant {
   user_id: number
   name: string
   phone_last_four: string
-  role: 'PLAYER' | 'SUBSTITUTE' | 'EXTRA'
+  role: 'PLAYER' | 'SUBSTITUTE'
   team: 'A' | 'B' | null
   team_number: number | null
+  has_paid: boolean
+  payment_notes: string | null
 }
 
 interface Admin {
@@ -151,6 +159,22 @@ export function MatchDetailClient({
   const { showLoader, hideLoader } = useActionLoader()
   const { showError } = useErrorToast()
 
+  function formatCurrencyARS(value: number): string {
+    return new Intl.NumberFormat('es-AR', {
+      style: 'currency',
+      currency: 'ARS',
+      maximumFractionDigits: 0,
+    }).format(value)
+  }
+
+  function roundUpToPeso(value: number): number {
+    return Math.ceil(value)
+  }
+
+  function onlyDigits(value: string): string {
+    return value.replace(/\D+/g, '')
+  }
+
   function computedMaxPlayersValue(teamCount: number, teamSize: number): number {
     return Math.max(1, teamCount) * Math.max(1, teamSize)
   }
@@ -168,6 +192,11 @@ export function MatchDetailClient({
     if (teamCount <= 0) return match.max_players
     return Math.max(1, teamCount) * Math.max(1, teamSize)
   }
+
+  // Max players:
+  // - when teams are enabled, it is derived (team_count * team_size)
+  // - when no teams, it is chosen by creator/admin (match.max_players)
+  const maxPlayers = match.team_count > 0 ? computedMaxPlayers(match.team_count, match.team_size) : match.max_players
 
   // Edit state for each field
   const [editTitle, setEditTitle] = useState(match.title || '')
@@ -238,7 +267,104 @@ export function MatchDetailClient({
 
   const players = effectiveParticipants.filter(p => p.role === 'PLAYER')
   const substitutes = effectiveParticipants.filter(p => p.role === 'SUBSTITUTE')
-  const extras = effectiveParticipants.filter(p => p.role === 'EXTRA')
+
+  const activePlayersForPayments = players
+  const fieldRentTotal = match.field_rent_total ?? 0
+  const expectedPerPlayer = maxPlayers > 0 ? roundUpToPeso(fieldRentTotal / maxPlayers) : 0
+  const activeCount = activePlayersForPayments.length
+  const perActivePlayer = activeCount > 0 ? roundUpToPeso(fieldRentTotal / activeCount) : 0
+  const paidCount = activePlayersForPayments.filter(p => p.has_paid).length
+
+  const [editFieldRentTotal, setEditFieldRentTotal] = useState<string>(
+    match.field_rent_total === null || match.field_rent_total === undefined ? '' : match.field_rent_total.toString()
+  )
+
+  const fieldRentRaw = editFieldRentTotal.trim()
+  const fieldRentNextParsed = fieldRentRaw === '' ? null : Number.parseInt(fieldRentRaw, 10)
+  const isFieldRentInvalid = fieldRentRaw !== '' && (fieldRentNextParsed === null || !Number.isFinite(fieldRentNextParsed) || fieldRentNextParsed < 0)
+  const currentFieldRentRaw = match.field_rent_total === null || match.field_rent_total === undefined ? '' : match.field_rent_total.toString()
+  const isFieldRentSaveDisabled = isFieldRentInvalid || fieldRentRaw === currentFieldRentRaw
+
+  const [localNotes, setLocalNotes] = useState<Record<number, string>>(() => {
+    const entries = activePlayersForPayments.map(p => [p.id, p.payment_notes ?? ''] as const)
+    return Object.fromEntries(entries)
+  })
+
+  const [notesSavingIds, setNotesSavingIds] = useState<Set<number>>(new Set())
+  const [paidSavingIds, setPaidSavingIds] = useState<Set<number>>(new Set())
+
+  useEffect(() => {
+    setEditFieldRentTotal(match.field_rent_total === null || match.field_rent_total === undefined ? '' : match.field_rent_total.toString())
+  }, [match.field_rent_total])
+
+  useEffect(() => {
+    const entries = activePlayersForPayments.map(p => [p.id, p.payment_notes ?? ''] as const)
+    setLocalNotes(Object.fromEntries(entries))
+  }, [participants, players.length])
+
+  async function handleSaveFieldRentTotal(): Promise<void> {
+    const raw = editFieldRentTotal.trim()
+    const nextParsed = raw === '' ? null : Number.parseInt(raw, 10)
+    if (raw !== '' && (nextParsed === null || !Number.isFinite(nextParsed) || nextParsed < 0)) {
+      showError('Monto invalido', 'Ingresá un numero mayor o igual a 0')
+      return
+    }
+
+    showLoader('Guardando costo de cancha...')
+    const result = await updateMatchFieldRentTotal(match.id, nextParsed)
+    hideLoader()
+    if (result?.error) {
+      showError('Error al intentar actualizar costo de cancha', result.error)
+    } else {
+      router.refresh()
+    }
+  }
+
+  async function handleTogglePaid(participantId: number, hasPaid: boolean): Promise<void> {
+    if (!isAdmin) return
+    setPaidSavingIds(prev => {
+      const next = new Set(prev)
+      next.add(participantId)
+      return next
+    })
+
+    const result = await setParticipantPaymentStatus(match.id, participantId, hasPaid)
+
+    setPaidSavingIds(prev => {
+      const next = new Set(prev)
+      next.delete(participantId)
+      return next
+    })
+
+    if (result?.error) {
+      showError('Error al intentar actualizar pago', result.error)
+    } else {
+      router.refresh()
+    }
+  }
+
+  async function handleSaveNotes(participantId: number): Promise<void> {
+    const note = (localNotes[participantId] ?? '').trimEnd()
+    setNotesSavingIds(prev => {
+      const next = new Set(prev)
+      next.add(participantId)
+      return next
+    })
+
+    const result = await updateParticipantPaymentNotes(match.id, participantId, note)
+
+    setNotesSavingIds(prev => {
+      const next = new Set(prev)
+      next.delete(participantId)
+      return next
+    })
+
+    if (result?.error) {
+      showError('Error al intentar actualizar notas', result.error)
+    } else {
+      router.refresh()
+    }
+  }
 
   const getParticipantTeamNumber = (participant: Participant): number | null => {
     if (participant.team_number !== null && participant.team_number !== undefined) {
@@ -280,11 +406,6 @@ export function MatchDetailClient({
   const selectedParticipant = selectedParticipantId
     ? effectiveParticipants.find(p => p.id === selectedParticipantId) || null
     : null
-
-  // Max players:
-  // - when teams are enabled, it is derived (team_count * team_size)
-  // - when no teams, it is chosen by creator/admin (match.max_players)
-  const maxPlayers = match.team_count > 0 ? computedMaxPlayers(match.team_count, match.team_size) : match.max_players
 
   const [pendingTeamSettings, setPendingTeamSettings] = useState<{
     teamCount: number
@@ -352,9 +473,9 @@ export function MatchDetailClient({
   const canEditGoForward = editWeekOffset < 4
   const canEditGoBack = editWeekOffset > 0
 
-  async function handleJoin(role: 'PLAYER' | 'SUBSTITUTE' | 'EXTRA') {
+  async function handleJoin(role: 'PLAYER' | 'SUBSTITUTE') {
     setLoading(`join-${role}`)
-    const roleLabels: Record<string, string> = { PLAYER: 'Jugador', SUBSTITUTE: 'Suplente', EXTRA: 'Por las dudas' }
+    const roleLabels: Record<'PLAYER' | 'SUBSTITUTE', string> = { PLAYER: 'Jugador', SUBSTITUTE: 'Suplente' }
     showLoader(`Anotandote como ${roleLabels[role]}...`)
     const result = await joinMatch(match.id, role)
     hideLoader()
@@ -765,7 +886,7 @@ export function MatchDetailClient({
             <div className="flex-1 flex flex-col gap-3">
               {/* Title */}
               <EditableField
-                icon={<Pencil className="w-4 h-4 text-primary" />}
+                icon={<Signature className="w-4 h-4 text-primary" />}
                 displayValue={
                   <h1 className="text-xl font-bold text-foreground">{displayTitle}</h1>
                 }
@@ -1220,31 +1341,21 @@ export function MatchDetailClient({
                   {loading === 'join-PLAYER' ? (
                     <InlineLoader size="sm" />
                   ) : (
-                    <UserPlus className="w-4 h-4" />
+                    <UserRoundPlus className="w-4 h-4" />
                   )}
-                  Anotarme
+                  Anotarme como jugador
                 </Button>
                 <Button
-                  variant="secondary"
+                  variant="outline"
                   onClick={() => handleJoin('SUBSTITUTE')}
                   disabled={isLoading}
                 >
                   {loading === 'join-SUBSTITUTE' ? (
                     <InlineLoader size="sm" />
                   ) : (
-                    'Como suplente'
+                    <UserRoundPlus className="w-4 h-4" />
                   )}
-                </Button>
-                <Button
-                  variant="outline"
-                  onClick={() => handleJoin('EXTRA')}
-                  disabled={isLoading}
-                >
-                  {loading === 'join-EXTRA' ? (
-                    <InlineLoader size="sm" />
-                  ) : (
-                    'Por las dudas'
-                  )}
+                  Anotarme como suplente
                 </Button>
               </div>
             </div>
@@ -1307,19 +1418,6 @@ export function MatchDetailClient({
               matchCreatorId={match.created_by_user_id}
               loadingParticipantIds={loadingParticipantIds}
             />
-
-            {extras.length > 0 && (
-              <div className="flex flex-col gap-2">
-                <h4 className="text-sm font-medium text-muted-foreground">Por las dudas ({extras.length})</h4>
-                <div className="flex flex-wrap gap-2">
-                  {extras.map((p) => (
-                    <Badge key={p.id} variant="outline" className="py-1.5 px-3">
-                      {p.name} ({p.phone_last_four})
-                    </Badge>
-                  ))}
-                </div>
-              </div>
-            )}
           </div>
 
           {/* Bottom actions - leave button moved here */}
@@ -1352,7 +1450,7 @@ export function MatchDetailClient({
                     {loading === 'leave' ? (
                       <InlineLoader size="sm" />
                     ) : (
-                      <UserMinus className="w-4 h-4" />
+                      <UserRoundMinus className="w-4 h-4" />
                     )}
                     Abandonar partido
                   </Button>
@@ -1360,6 +1458,141 @@ export function MatchDetailClient({
               </div>
             </div>
           )}
+
+          {/* Payments agenda (goes last) */}
+          <div className="flex flex-col gap-3 p-3 rounded-lg border border-border bg-muted/30">
+            <div className="flex items-center justify-between gap-2 flex-wrap">
+              <div className="flex items-center gap-2">
+                <Wallet className="w-4 h-4 text-primary" />
+                <span className="font-medium text-sm text-foreground">Pagos</span>
+                {fieldRentTotal > 0 ? (
+                  <Badge variant="secondary" className="text-xs">
+                    {paidCount}/{activeCount}
+                  </Badge>
+                ) : null}
+              </div>
+
+              <div className="flex items-center gap-3 flex-wrap">
+                {fieldRentTotal > 0 ? (
+                  <div className="flex items-start gap-2 text-xs text-muted-foreground">
+                    <span className="whitespace-nowrap">Precio por jugador</span>
+                    <div className="flex flex-col leading-tight">
+                      <span>
+                        ({maxPlayers} jugadores):{' '}
+                        <span className="text-foreground font-medium">{formatCurrencyARS(expectedPerPlayer)}</span>
+                      </span>
+                      {activeCount > 0 && expectedPerPlayer !== perActivePlayer ? (
+                        <span>
+                          ({activeCount} jugadores):{' '}
+                          <span className="text-foreground font-medium">{formatCurrencyARS(perActivePlayer)}</span>
+                        </span>
+                      ) : null}
+                    </div>
+                  </div>
+                ) : null}
+
+                {isAdmin && !isPast ? (
+                  <div className="relative">
+                    <Input
+                      type="text"
+                      inputMode="numeric"
+                      pattern="[0-9]*"
+                      value={editFieldRentTotal}
+                      onChange={(e) => setEditFieldRentTotal(onlyDigits(e.target.value))}
+                      onKeyDown={(e: KeyboardEvent<HTMLInputElement>) => {
+                        if (e.key !== 'Enter') return
+                        if (isFieldRentSaveDisabled) return
+                        e.preventDefault()
+                        void handleSaveFieldRentTotal()
+                      }}
+                      placeholder="Costo total"
+                      className="w-36 pr-9"
+                    />
+                    <button
+                      type="button"
+                      aria-label="Guardar costo"
+                      onClick={handleSaveFieldRentTotal}
+                      disabled={isFieldRentSaveDisabled}
+                      className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground disabled:opacity-40"
+                    >
+                      <Save className="w-4 h-4" />
+                    </button>
+                  </div>
+                ) : (
+                  <span className="text-sm text-muted-foreground">
+                    Costo de cancha: {fieldRentTotal > 0 ? formatCurrencyARS(fieldRentTotal) : '—'}
+                  </span>
+                )}
+              </div>
+            </div>
+
+            {activePlayersForPayments.length === 0 ? (
+              <span className="text-sm text-muted-foreground">No hay jugadores activos para calcular pagos.</span>
+            ) : (
+              <div className="flex flex-col gap-1">
+                {activePlayersForPayments.map(p => {
+                  const canEditThisNote = (isAdmin || p.user_id === currentUserId) && !isPast
+                  const isSavingPaid = paidSavingIds.has(p.id)
+                  const isSavingNote = notesSavingIds.has(p.id)
+                  const currentNote = p.payment_notes ?? ''
+                  const draft = localNotes[p.id] ?? ''
+                  const hasNoteChanges = draft !== currentNote
+
+                  return (
+                    <div
+                      key={p.id}
+                      className="flex items-center gap-2 py-1"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={Boolean(p.has_paid)}
+                        onChange={(e) => handleTogglePaid(p.id, e.target.checked)}
+                        disabled={!isAdmin || isPast || isSavingPaid}
+                        className="h-4 w-4 accent-primary disabled:opacity-50"
+                        aria-label={`Pago de ${p.name}`}
+                      />
+
+                      <div className="min-w-0 flex items-center gap-1">
+                        <span className="text-sm font-medium truncate">{p.name}</span>
+                        <span className="text-sm text-muted-foreground truncate">({p.phone_last_four})</span>
+                      </div>
+
+                      <div className="flex items-center gap-2 flex-1 min-w-0">
+                        <span className="text-xs text-muted-foreground whitespace-nowrap">notas:</span>
+                        <div className="relative flex-1 min-w-0">
+                          <Input
+                            value={draft}
+                            onChange={(e) => {
+                              const next = e.target.value
+                              setLocalNotes(prev => ({ ...prev, [p.id]: next }))
+                            }}
+                            onKeyDown={(e: KeyboardEvent<HTMLInputElement>) => {
+                              if (e.key !== 'Enter') return
+                              if (!canEditThisNote || isSavingNote || !hasNoteChanges) return
+                              e.preventDefault()
+                              void handleSaveNotes(p.id)
+                            }}
+                            placeholder=""
+                            disabled={!canEditThisNote || isSavingNote}
+                            className="h-8 pr-9 placeholder:text-muted-foreground/30"
+                          />
+                          <button
+                            type="button"
+                            aria-label={`Guardar notas de ${p.name}`}
+                            onClick={() => handleSaveNotes(p.id)}
+                            disabled={!canEditThisNote || isSavingNote || !hasNoteChanges}
+                            className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground disabled:opacity-40"
+                          >
+                            {isSavingNote ? <InlineLoader size="sm" /> : <Save className="w-4 h-4" />}
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+          </div>
         </CardContent>
       </Card>
 
@@ -1430,10 +1663,10 @@ export function MatchDetailClient({
       <AlertDialog open={showTeamResetWarning !== null} onOpenChange={() => setShowTeamResetWarning(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Cambiar configuracion de equipos</AlertDialogTitle>
+            <AlertDialogTitle>Cambiar configuración de equipos</AlertDialogTitle>
             <AlertDialogDescription>
-              Cambiar la configuracion de equipos va a quitar las asignaciones actuales (equipos) de todos los jugadores.
-              Podras rearmarlos despues. Queres continuar?
+              Cambiar la configuración de equipos va a quitar las asignaciones actuales (equipos) de todos los jugadores.
+              Podrás rearmarlos después. Queres continuar?
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

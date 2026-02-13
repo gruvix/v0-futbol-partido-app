@@ -76,31 +76,83 @@ export async function createMatch(formData: FormData) {
   }
 }
 
-export async function joinMatch(matchId: number, role: 'PLAYER' | 'SUBSTITUTE' | 'EXTRA' = 'PLAYER') {
+export async function joinMatch(matchId: number, role: 'PLAYER' | 'SUBSTITUTE' = 'PLAYER') {
   const session = await getSession()
   if (!session) {
     return { error: 'No autenticado' }
   }
 
+  // Safety: in case some old client still sends EXTRA
+  if (role !== 'PLAYER' && role !== 'SUBSTITUTE') {
+    return { error: 'Rol invalido' }
+  }
+
   try {
-    // Check if already joined
-    const existing = await sql`
-      SELECT id FROM match_participants 
-      WHERE match_id = ${matchId} AND user_id = ${session.userId}
+    // Enforce capacity when trying to join as PLAYER.
+    // Fullness is based on total amount of non-substitute players registered in the match,
+    // i.e. role === 'PLAYER' across all teams + no-team list.
+    // (SUBSTITUTE does not consume a player slot.)
+
+    const upsert = await sql`
+      WITH match_data AS (
+        SELECT
+          CASE
+            WHEN team_count > 0 THEN GREATEST(1, team_count) * GREATEST(1, team_size)
+            ELSE max_players
+          END AS max_players
+        FROM matches
+        WHERE id = ${matchId}
+      ),
+      player_count AS (
+        SELECT COUNT(*)::int AS count
+        FROM match_participants
+        WHERE match_id = ${matchId}
+          AND role = 'PLAYER'
+          AND user_id <> ${session.userId}
+      ),
+      existing AS (
+        SELECT id, role
+        FROM match_participants
+        WHERE match_id = ${matchId} AND user_id = ${session.userId}
+      ),
+      do_update AS (
+        UPDATE match_participants mp
+        SET role = ${role}::participant_role
+        FROM match_data md, player_count pc, existing e
+        WHERE mp.id = e.id
+          AND (
+            ${role}::text <> 'PLAYER'
+            OR e.role = 'PLAYER'
+            OR md.max_players <= 0
+            OR pc.count < md.max_players
+          )
+        RETURNING mp.id
+      ),
+      do_insert AS (
+        INSERT INTO match_participants (match_id, user_id, role)
+        SELECT ${matchId}, ${session.userId}, ${role}::participant_role
+        FROM match_data md, player_count pc
+        WHERE NOT EXISTS (SELECT 1 FROM existing)
+          AND (
+            ${role}::text <> 'PLAYER'
+            OR md.max_players <= 0
+            OR pc.count < md.max_players
+          )
+        RETURNING id
+      )
+      SELECT id FROM do_update
+      UNION ALL
+      SELECT id FROM do_insert
     `
 
-    if (existing.length > 0) {
-      // Update role
-      await sql`
-        UPDATE match_participants 
-        SET role = ${role}
-        WHERE match_id = ${matchId} AND user_id = ${session.userId}
-      `
-    } else {
-      await sql`
-        INSERT INTO match_participants (match_id, user_id, role)
-        VALUES (${matchId}, ${session.userId}, ${role})
-      `
+    if (upsert.length === 0) {
+      // Either the match doesn't exist, or capacity was reached.
+      // Disambiguate for a better message.
+      const matchExists = await sql`SELECT 1 FROM matches WHERE id = ${matchId}`
+      if (matchExists.length === 0) {
+        return { error: 'Partido no encontrado' }
+      }
+      return { error: 'El partido ya está lleno' }
     }
 
     revalidatePath(`/dashboard/partido/${matchId}`)
@@ -224,11 +276,17 @@ export async function assignTeam(matchId: number, participantId: number, team: '
   }
 
   try {
-    await sql`
+    // Only non-substitute players should be assigned to teams.
+    const updated = await sql`
       UPDATE match_participants 
       SET team = ${team}
-      WHERE id = ${participantId} AND match_id = ${matchId}
+      WHERE id = ${participantId} AND match_id = ${matchId} AND role = 'PLAYER'
+      RETURNING id
     `
+
+    if (updated.length === 0) {
+      return { error: 'Solo los jugadores pueden estar asignados a un equipo' }
+    }
 
     revalidatePath(`/dashboard/partido/${matchId}`)
     return { success: true }
@@ -285,10 +343,15 @@ export async function randomizeTeams(matchId: number) {
   }
 }
 
-export async function invitePlayer(matchId: number, userId: number, role: 'PLAYER' | 'SUBSTITUTE' | 'EXTRA' = 'PLAYER') {
+export async function invitePlayer(matchId: number, userId: number, role: 'PLAYER' | 'SUBSTITUTE' = 'PLAYER') {
   const session = await getSession()
   if (!session) {
     return { error: 'No autenticado' }
+  }
+
+  // Safety: in case some old client still sends EXTRA
+  if (role !== 'PLAYER' && role !== 'SUBSTITUTE') {
+    return { error: 'Rol invalido' }
   }
 
   try {
@@ -316,10 +379,37 @@ export async function invitePlayer(matchId: number, userId: number, role: 'PLAYE
       }
     }
 
-    await sql`
+    // Enforce capacity for PLAYER invites (same rule as joining).
+    const inserted = await sql`
+      WITH match_data AS (
+        SELECT
+          CASE
+            WHEN team_count > 0 THEN GREATEST(1, team_count) * GREATEST(1, team_size)
+            ELSE max_players
+          END AS max_players
+        FROM matches
+        WHERE id = ${matchId}
+      ),
+      player_count AS (
+        SELECT COUNT(*)::int AS count
+        FROM match_participants
+        WHERE match_id = ${matchId}
+          AND role = 'PLAYER'
+      )
       INSERT INTO match_participants (match_id, user_id, role)
-      VALUES (${matchId}, ${userId}, ${role})
+      SELECT ${matchId}, ${userId}, ${role}::participant_role
+      FROM match_data md, player_count pc
+      WHERE (
+        ${role}::text <> 'PLAYER'
+        OR md.max_players <= 0
+        OR pc.count < md.max_players
+      )
+      RETURNING id
     `
+
+    if (inserted.length === 0) {
+      return { error: 'El partido ya está lleno' }
+    }
 
     // Track the invite
     await sql`
@@ -385,6 +475,90 @@ export async function isMatchAdmin(matchId: number): Promise<boolean> {
     SELECT 1 FROM matches WHERE id = ${matchId} AND created_by_user_id = ${session.userId}
   `
   return result.length > 0
+}
+
+export async function updateMatchFieldRentTotal(matchId: number, fieldRentTotal: number | null) {
+  const session = await getSession()
+  if (!session) {
+    return { error: 'No autenticado' }
+  }
+
+  const isAdmin = await isMatchAdmin(matchId)
+  if (!isAdmin) {
+    return { error: 'Solo los administradores pueden modificar los pagos' }
+  }
+
+  try {
+    await sql`
+      UPDATE matches
+      SET field_rent_total = ${fieldRentTotal}
+      WHERE id = ${matchId}
+    `
+    revalidatePath(`/dashboard/partido/${matchId}`)
+    return { success: true }
+  } catch (error) {
+    console.error('Error updating match field rent total:', error)
+    return { error: 'Error al actualizar el alquiler de la cancha' }
+  }
+}
+
+export async function setParticipantPaymentStatus(matchId: number, participantId: number, hasPaid: boolean) {
+  const session = await getSession()
+  if (!session) {
+    return { error: 'No autenticado' }
+  }
+
+  const isAdmin = await isMatchAdmin(matchId)
+  if (!isAdmin) {
+    return { error: 'Solo los administradores pueden confirmar pagos' }
+  }
+
+  try {
+    await sql`
+      UPDATE match_participants
+      SET has_paid = ${hasPaid}
+      WHERE id = ${participantId} AND match_id = ${matchId}
+    `
+    revalidatePath(`/dashboard/partido/${matchId}`)
+    return { success: true }
+  } catch (error) {
+    console.error('Error updating participant payment status:', error)
+    return { error: 'Error al actualizar estado de pago' }
+  }
+}
+
+export async function updateParticipantPaymentNotes(matchId: number, participantId: number, paymentNotes: string) {
+  const session = await getSession()
+  if (!session) {
+    return { error: 'No autenticado' }
+  }
+
+  const isAdmin = await isMatchAdmin(matchId)
+
+  try {
+    if (!isAdmin) {
+      // Users can only update their own notes
+      const ownership = await sql`
+        SELECT 1
+        FROM match_participants
+        WHERE id = ${participantId} AND match_id = ${matchId} AND user_id = ${session.userId}
+      `
+      if (ownership.length === 0) {
+        return { error: 'Solo podes modificar tus notas' }
+      }
+    }
+
+    await sql`
+      UPDATE match_participants
+      SET payment_notes = ${paymentNotes}
+      WHERE id = ${participantId} AND match_id = ${matchId}
+    `
+    revalidatePath(`/dashboard/partido/${matchId}`)
+    return { success: true }
+  } catch (error) {
+    console.error('Error updating participant payment notes:', error)
+    return { error: 'Error al actualizar notas' }
+  }
 }
 
 // Update match field with admin check
@@ -612,11 +786,48 @@ export async function changeParticipantRole(matchId: number, participantId: numb
   }
 
   try {
-    await sql`
-      UPDATE match_participants 
-      SET role = ${newRole}, team = NULL, team_number = NULL
-      WHERE id = ${participantId} AND match_id = ${matchId}
+    // Enforce capacity when promoting to PLAYER.
+    const updated = await sql`
+      WITH target AS (
+        SELECT user_id, role
+        FROM match_participants
+        WHERE id = ${participantId} AND match_id = ${matchId}
+      ),
+      match_data AS (
+        SELECT
+          CASE
+            WHEN team_count > 0 THEN GREATEST(1, team_count) * GREATEST(1, team_size)
+            ELSE max_players
+          END AS max_players
+        FROM matches
+        WHERE id = ${matchId}
+      ),
+      player_count AS (
+        SELECT COUNT(*)::int AS count
+        FROM match_participants mp
+        JOIN target t ON true
+        WHERE mp.match_id = ${matchId}
+          AND mp.role = 'PLAYER'
+          AND mp.user_id <> t.user_id
+      )
+      UPDATE match_participants mp
+      SET role = ${newRole}::participant_role,
+          team = NULL,
+          team_number = NULL
+      FROM target t, match_data md, player_count pc
+      WHERE mp.id = ${participantId} AND mp.match_id = ${matchId}
+        AND (
+          ${newRole}::text <> 'PLAYER'
+          OR t.role = 'PLAYER'
+          OR md.max_players <= 0
+          OR pc.count < md.max_players
+        )
+      RETURNING mp.id
     `
+
+    if (updated.length === 0 && newRole === 'PLAYER') {
+      return { error: 'El partido ya está lleno' }
+    }
     revalidatePath(`/dashboard/partido/${matchId}`)
     return { success: true }
   } catch (error) {
@@ -651,11 +862,17 @@ export async function assignTeamNumber(matchId: number, participantId: number, t
   }
 
   try {
-    await sql`
-      UPDATE match_participants 
+    // Only non-substitute players should be assigned to teams.
+    const updated = await sql`
+      UPDATE match_participants
       SET team_number = ${teamNumber}
-      WHERE id = ${participantId} AND match_id = ${matchId}
+      WHERE id = ${participantId} AND match_id = ${matchId} AND role = 'PLAYER'
+      RETURNING id
     `
+
+    if (updated.length === 0) {
+      return { error: 'Solo los jugadores pueden estar asignados a un equipo' }
+    }
 
     revalidatePath(`/dashboard/partido/${matchId}`)
     return { success: true }

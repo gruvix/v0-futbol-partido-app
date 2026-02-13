@@ -17,6 +17,7 @@ interface Match {
   team_size: number
   max_players: number
   invites_per_player: number | null
+  field_rent_total: number | null
 }
 
 interface Participant {
@@ -24,9 +25,11 @@ interface Participant {
   user_id: number
   name: string
   phone_last_four: string
-  role: 'PLAYER' | 'SUBSTITUTE' | 'EXTRA'
+  role: 'PLAYER' | 'SUBSTITUTE'
   team: 'A' | 'B' | null
   team_number: number | null
+  has_paid: boolean
+  payment_notes: string | null
 }
 
 interface Admin {
@@ -50,6 +53,7 @@ async function getMatch(id: number): Promise<Match | null> {
       m.team_size,
       m.max_players,
       m.invites_per_player,
+      m.field_rent_total,
       u.name as creator_name
     FROM matches m
     JOIN users u ON m.created_by_user_id = u.id
@@ -65,17 +69,18 @@ async function getParticipants(matchId: number): Promise<Participant[]> {
       mp.user_id,
       u.name,
       u.phone_last_four,
-      mp.role,
+      CASE WHEN mp.role = 'EXTRA' THEN 'SUBSTITUTE' ELSE mp.role::text END AS role,
       mp.team,
-      mp.team_number
+      mp.team_number,
+      mp.has_paid,
+      mp.payment_notes
     FROM match_participants mp
     JOIN users u ON mp.user_id = u.id
     WHERE mp.match_id = ${matchId}
     ORDER BY 
-      CASE mp.role 
-        WHEN 'PLAYER' THEN 1 
-        WHEN 'SUBSTITUTE' THEN 2 
-        WHEN 'EXTRA' THEN 3 
+      CASE (CASE WHEN mp.role = 'EXTRA' THEN 'SUBSTITUTE' ELSE mp.role::text END)
+        WHEN 'PLAYER' THEN 1
+        WHEN 'SUBSTITUTE' THEN 2
       END,
       mp.created_at ASC
   `

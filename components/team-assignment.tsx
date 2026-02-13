@@ -23,7 +23,7 @@ interface Participant {
   user_id: number
   name: string
   phone_last_four: string
-  role: 'PLAYER' | 'SUBSTITUTE' | 'EXTRA'
+  role: 'PLAYER' | 'SUBSTITUTE'
   team: 'A' | 'B' | null
   team_number?: number | null
 }
