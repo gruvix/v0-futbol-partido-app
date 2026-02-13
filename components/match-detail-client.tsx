@@ -22,11 +22,11 @@ import {
   Lock,
   ChevronLeft,
   ChevronRight,
+  Pencil,
   Save,
   Wallet,
   UserRoundPlus,
   UserRoundMinus,
-  Signature,
 } from 'lucide-react'
 import {
   joinMatch,
@@ -93,8 +93,10 @@ interface Participant {
   role: 'PLAYER' | 'SUBSTITUTE'
   team: 'A' | 'B' | null
   team_number: number | null
-  has_paid: boolean
-  payment_notes: string | null
+  // When the viewer is not subscribed to the match, the server does not
+  // include payment info to avoid leaking it.
+  has_paid?: boolean | null
+  payment_notes?: string | null
 }
 
 interface Admin {
@@ -268,6 +270,7 @@ export function MatchDetailClient({
   const players = effectiveParticipants.filter(p => p.role === 'PLAYER')
   const substitutes = effectiveParticipants.filter(p => p.role === 'SUBSTITUTE')
 
+  const isSubscribed = Boolean(userParticipation)
   const activePlayersForPayments = players
   const fieldRentTotal = match.field_rent_total ?? 0
   const expectedPerPlayer = maxPlayers > 0 ? roundUpToPeso(fieldRentTotal / maxPlayers) : 0
@@ -886,7 +889,7 @@ export function MatchDetailClient({
             <div className="flex-1 flex flex-col gap-3">
               {/* Title */}
               <EditableField
-                icon={<Signature className="w-4 h-4 text-primary" />}
+                icon={<Pencil className="w-4 h-4 text-primary" />}
                 displayValue={
                   <h1 className="text-xl font-bold text-foreground">{displayTitle}</h1>
                 }
@@ -1459,140 +1462,142 @@ export function MatchDetailClient({
             </div>
           )}
 
-          {/* Payments agenda (goes last) */}
-          <div className="flex flex-col gap-3 p-3 rounded-lg border border-border bg-muted/30">
-            <div className="flex items-center justify-between gap-2 flex-wrap">
-              <div className="flex items-center gap-2">
-                <Wallet className="w-4 h-4 text-primary" />
-                <span className="font-medium text-sm text-foreground">Pagos</span>
-                {fieldRentTotal > 0 ? (
-                  <Badge variant="secondary" className="text-xs">
-                    {paidCount}/{activeCount}
-                  </Badge>
-                ) : null}
-              </div>
+          {/* Payments agenda (only visible for subscribed users) */}
+          {isSubscribed ? (
+            <div className="flex flex-col gap-3 p-3 rounded-lg border border-border bg-muted/30">
+              <div className="flex items-center justify-between gap-2 flex-wrap">
+                <div className="flex items-center gap-2">
+                  <Wallet className="w-4 h-4 text-primary" />
+                  <span className="font-medium text-sm text-foreground">Pagos</span>
+                  {fieldRentTotal > 0 ? (
+                    <Badge variant="secondary" className="text-xs">
+                      {paidCount}/{activeCount}
+                    </Badge>
+                  ) : null}
+                </div>
 
-              <div className="flex items-center gap-3 flex-wrap">
-                {fieldRentTotal > 0 ? (
-                  <div className="flex items-start gap-2 text-xs text-muted-foreground">
-                    <span className="whitespace-nowrap">Precio por jugador</span>
-                    <div className="flex flex-col leading-tight">
-                      <span>
-                        ({maxPlayers} jugadores):{' '}
-                        <span className="text-foreground font-medium">{formatCurrencyARS(expectedPerPlayer)}</span>
-                      </span>
-                      {activeCount > 0 && expectedPerPlayer !== perActivePlayer ? (
+                <div className="flex items-center gap-3 flex-wrap">
+                  {fieldRentTotal > 0 ? (
+                    <div className="flex items-start gap-2 text-xs text-muted-foreground">
+                      <span className="whitespace-nowrap">Precio por jugador</span>
+                      <div className="flex flex-col leading-tight">
                         <span>
-                          ({activeCount} jugadores):{' '}
-                          <span className="text-foreground font-medium">{formatCurrencyARS(perActivePlayer)}</span>
+                          ({maxPlayers} jugadores):{' '}
+                          <span className="text-foreground font-medium">{formatCurrencyARS(expectedPerPlayer)}</span>
                         </span>
-                      ) : null}
-                    </div>
-                  </div>
-                ) : null}
-
-                {isAdmin && !isPast ? (
-                  <div className="relative">
-                    <Input
-                      type="text"
-                      inputMode="numeric"
-                      pattern="[0-9]*"
-                      value={editFieldRentTotal}
-                      onChange={(e) => setEditFieldRentTotal(onlyDigits(e.target.value))}
-                      onKeyDown={(e: KeyboardEvent<HTMLInputElement>) => {
-                        if (e.key !== 'Enter') return
-                        if (isFieldRentSaveDisabled) return
-                        e.preventDefault()
-                        void handleSaveFieldRentTotal()
-                      }}
-                      placeholder="Costo total"
-                      className="w-36 pr-9"
-                    />
-                    <button
-                      type="button"
-                      aria-label="Guardar costo"
-                      onClick={handleSaveFieldRentTotal}
-                      disabled={isFieldRentSaveDisabled}
-                      className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground disabled:opacity-40"
-                    >
-                      <Save className="w-4 h-4" />
-                    </button>
-                  </div>
-                ) : (
-                  <span className="text-sm text-muted-foreground">
-                    Costo de cancha: {fieldRentTotal > 0 ? formatCurrencyARS(fieldRentTotal) : '—'}
-                  </span>
-                )}
-              </div>
-            </div>
-
-            {activePlayersForPayments.length === 0 ? (
-              <span className="text-sm text-muted-foreground">No hay jugadores activos para calcular pagos.</span>
-            ) : (
-              <div className="flex flex-col gap-1">
-                {activePlayersForPayments.map(p => {
-                  const canEditThisNote = (isAdmin || p.user_id === currentUserId) && !isPast
-                  const isSavingPaid = paidSavingIds.has(p.id)
-                  const isSavingNote = notesSavingIds.has(p.id)
-                  const currentNote = p.payment_notes ?? ''
-                  const draft = localNotes[p.id] ?? ''
-                  const hasNoteChanges = draft !== currentNote
-
-                  return (
-                    <div
-                      key={p.id}
-                      className="flex items-center gap-2 py-1"
-                    >
-                      <input
-                        type="checkbox"
-                        checked={Boolean(p.has_paid)}
-                        onChange={(e) => handleTogglePaid(p.id, e.target.checked)}
-                        disabled={!isAdmin || isPast || isSavingPaid}
-                        className="h-4 w-4 accent-primary disabled:opacity-50"
-                        aria-label={`Pago de ${p.name}`}
-                      />
-
-                      <div className="min-w-0 flex items-center gap-1">
-                        <span className="text-sm font-medium truncate">{p.name}</span>
-                        <span className="text-sm text-muted-foreground truncate">({p.phone_last_four})</span>
+                        {activeCount > 0 && expectedPerPlayer !== perActivePlayer ? (
+                          <span>
+                            ({activeCount} jugadores):{' '}
+                            <span className="text-foreground font-medium">{formatCurrencyARS(perActivePlayer)}</span>
+                          </span>
+                        ) : null}
                       </div>
+                    </div>
+                  ) : null}
 
-                      <div className="flex items-center gap-2 flex-1 min-w-0">
-                        <span className="text-xs text-muted-foreground whitespace-nowrap">notas:</span>
-                        <div className="relative flex-1 min-w-0">
-                          <Input
-                            value={draft}
-                            onChange={(e) => {
-                              const next = e.target.value
-                              setLocalNotes(prev => ({ ...prev, [p.id]: next }))
-                            }}
-                            onKeyDown={(e: KeyboardEvent<HTMLInputElement>) => {
-                              if (e.key !== 'Enter') return
-                              if (!canEditThisNote || isSavingNote || !hasNoteChanges) return
-                              e.preventDefault()
-                              void handleSaveNotes(p.id)
-                            }}
-                            placeholder=""
-                            disabled={!canEditThisNote || isSavingNote}
-                            className="h-8 pr-9 placeholder:text-muted-foreground/30"
-                          />
-                          <button
-                            type="button"
-                            aria-label={`Guardar notas de ${p.name}`}
-                            onClick={() => handleSaveNotes(p.id)}
-                            disabled={!canEditThisNote || isSavingNote || !hasNoteChanges}
-                            className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground disabled:opacity-40"
-                          >
-                            {isSavingNote ? <InlineLoader size="sm" /> : <Save className="w-4 h-4" />}
-                          </button>
+                  {isAdmin && !isPast ? (
+                    <div className="relative">
+                      <Input
+                        type="text"
+                        inputMode="numeric"
+                        pattern="[0-9]*"
+                        value={editFieldRentTotal}
+                        onChange={(e) => setEditFieldRentTotal(onlyDigits(e.target.value))}
+                        onKeyDown={(e: KeyboardEvent<HTMLInputElement>) => {
+                          if (e.key !== 'Enter') return
+                          if (isFieldRentSaveDisabled) return
+                          e.preventDefault()
+                          void handleSaveFieldRentTotal()
+                        }}
+                        placeholder="Costo total"
+                        className="w-36 pr-9"
+                      />
+                      <button
+                        type="button"
+                        aria-label="Guardar costo"
+                        onClick={handleSaveFieldRentTotal}
+                        disabled={isFieldRentSaveDisabled}
+                        className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground disabled:opacity-40"
+                      >
+                        <Save className="w-4 h-4" />
+                      </button>
+                    </div>
+                  ) : (
+                    <span className="text-sm text-muted-foreground">
+                      Costo de cancha: {fieldRentTotal > 0 ? formatCurrencyARS(fieldRentTotal) : '—'}
+                    </span>
+                  )}
+                </div>
+              </div>
+
+              {activePlayersForPayments.length === 0 ? (
+                <span className="text-sm text-muted-foreground">No hay jugadores activos para calcular pagos.</span>
+              ) : (
+                <div className="flex flex-col gap-1">
+                  {activePlayersForPayments.map(p => {
+                    const canEditThisNote = (isAdmin || p.user_id === currentUserId) && !isPast
+                    const isSavingPaid = paidSavingIds.has(p.id)
+                    const isSavingNote = notesSavingIds.has(p.id)
+                    const currentNote = p.payment_notes ?? ''
+                    const draft = localNotes[p.id] ?? ''
+                    const hasNoteChanges = draft !== currentNote
+
+                    return (
+                      <div
+                        key={p.id}
+                        className="flex items-center gap-2 py-1"
+                      >
+                        <input
+                          type="checkbox"
+                          checked={Boolean(p.has_paid)}
+                          onChange={(e) => handleTogglePaid(p.id, e.target.checked)}
+                          disabled={!isAdmin || isPast || isSavingPaid}
+                          className="h-4 w-4 accent-primary disabled:opacity-50"
+                          aria-label={`Pago de ${p.name}`}
+                        />
+
+                        <div className="min-w-0 flex items-center gap-1">
+                          <span className="text-sm font-medium truncate">{p.name}</span>
+                          <span className="text-sm text-muted-foreground truncate">({p.phone_last_four})</span>
+                        </div>
+
+                        <div className="flex items-center gap-2 flex-1 min-w-0">
+                          <span className="text-xs text-muted-foreground whitespace-nowrap">notas:</span>
+                          <div className="relative flex-1 min-w-0">
+                            <Input
+                              value={draft}
+                              onChange={(e) => {
+                                const next = e.target.value
+                                setLocalNotes(prev => ({ ...prev, [p.id]: next }))
+                              }}
+                              onKeyDown={(e: KeyboardEvent<HTMLInputElement>) => {
+                                if (e.key !== 'Enter') return
+                                if (!canEditThisNote || isSavingNote || !hasNoteChanges) return
+                                e.preventDefault()
+                                void handleSaveNotes(p.id)
+                              }}
+                              placeholder=""
+                              disabled={!canEditThisNote || isSavingNote}
+                              className="h-8 pr-9 placeholder:text-muted-foreground/30"
+                            />
+                            <button
+                              type="button"
+                              aria-label={`Guardar notas de ${p.name}`}
+                              onClick={() => handleSaveNotes(p.id)}
+                              disabled={!canEditThisNote || isSavingNote || !hasNoteChanges}
+                              className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground disabled:opacity-40"
+                            >
+                              {isSavingNote ? <InlineLoader size="sm" /> : <Save className="w-4 h-4" />}
+                            </button>
+                          </div>
                         </div>
                       </div>
-                    </div>
-                  )
-                })}
-              </div>
-            )}
-          </div>
+                    )
+                  })}
+                </div>
+              )}
+            </div>
+          ) : null}
         </CardContent>
       </Card>
 
