@@ -1,5 +1,6 @@
 import { CalendarView } from '@/components/calendar-view'
-import { cookies } from 'next/headers'
+import { sql } from '@/lib/db'
+import { getSession } from '@/lib/auth'
 
 interface MatchSummary {
   id: number
@@ -11,28 +12,45 @@ interface MatchSummary {
 }
 
 async function getMatchesForCalendarMonth(year: number, month: number): Promise<MatchSummary[]> {
-  // Initial render fetch for current month; subsequent month changes are fetched client-side.
-  // IMPORTANT: forward cookies, otherwise the API route returns 401 and you'll see an empty initial month.
-  const cookieHeader = (await cookies())
-    .getAll()
-    .map(({ name, value }) => `${name}=${value}`)
-    .join('; ')
+  // Initial render for current month; other months are fetched client-side.
+  // On the server, avoid calling our own API route via HTTP (which can break in prod if it
+  // accidentally points at localhost). Query the DB directly.
 
-  // In Next.js server components, fetch() requires an absolute URL.
-  // Prefer explicit NEXT_PUBLIC_APP_URL, otherwise fall back to localhost.
-  const origin = process.env.NEXT_PUBLIC_APP_URL ?? 'http://localhost:3000'
+  const session = await getSession()
+  if (!session) return []
 
-  const res = await fetch(`${origin}/api/matches/calendar?year=${year}&month=${month}`, {
-    cache: 'no-store',
-    headers: cookieHeader ? { cookie: cookieHeader } : undefined,
-  })
+  // month is 0-based in the UI.
+  const start = new Date(Date.UTC(year, month, 1, 0, 0, 0, 0))
+  const end = new Date(Date.UTC(year, month + 1, 1, 0, 0, 0, 0))
 
-  if (!res.ok) {
-    return []
-  }
+  // Calendar includes past matches, but still enforces privacy:
+  // - public matches are visible to everyone
+  // - private matches only visible to participants
+  const matches = await sql`
+    SELECT
+      m.id,
+      m.title,
+      m.date_time,
+      m.location_type,
+      m.location_custom,
+      COUNT(mp_all.id)::int as participant_count
+    FROM matches m
+    LEFT JOIN match_participants mp_all ON m.id = mp_all.match_id
+    WHERE
+      m.date_time >= ${start.toISOString()} AND m.date_time < ${end.toISOString()}
+      AND (
+        m.is_public = true
+        OR EXISTS (
+          SELECT 1
+          FROM match_participants mp_me
+          WHERE mp_me.match_id = m.id AND mp_me.user_id = ${session.userId}
+        )
+      )
+    GROUP BY m.id
+    ORDER BY m.date_time ASC
+  `
 
-  const data = (await res.json()) as { matches: MatchSummary[] }
-  return data.matches
+  return matches as MatchSummary[]
 }
 
 export default async function CalendarioPage() {
