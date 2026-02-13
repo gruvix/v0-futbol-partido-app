@@ -1628,14 +1628,6 @@ export function MatchDetailClient({
                                 !isMultiline && 'sm:flex-1 sm:flex-row sm:items-center sm:gap-2',
                               )}
                             >
-                              <span
-                                className={cn(
-                                  'text-xs text-muted-foreground',
-                                  !isMultiline && 'sm:whitespace-nowrap',
-                                )}
-                              >
-                                notas:
-                              </span>
                               <div className={cn('relative min-w-0', !isMultiline && 'sm:flex-1')}>
                                 <Textarea
                                   ref={(el) => {
@@ -1643,6 +1635,7 @@ export function MatchDetailClient({
                                     syncNoteTextareaSize(p.id, el)
                                   }}
                                   rows={1}
+                                  placeholder={`Notas de ${p.name}...`}
                                   value={draft}
                                   onChange={(e) => {
                                     const next = e.target.value
@@ -1655,9 +1648,8 @@ export function MatchDetailClient({
                                     e.preventDefault()
                                     void handleSaveNotes(p.id)
                                   }}
-                                  placeholder=""
                                   disabled={!canEditThisNote || isSavingNote}
-                                  className="min-h-8 resize-none overflow-hidden pr-9 py-1.5 placeholder:text-muted-foreground/30"
+                                  className="min-h-8 resize-none overflow-hidden pr-9 py-1.5 placeholder:text-muted-foreground/80"
                                 />
                                 <button
                                   type="button"
@@ -1718,7 +1710,7 @@ export function MatchDetailClient({
           <AlertDialogHeader>
             <AlertDialogTitle>Sos el ultimo anotado</AlertDialogTitle>
             <AlertDialogDescription>
-              Ya no queda nadie mas en este partido. Queres eliminarlo?
+              Ya no queda nadie mas en este partido. Querés eliminarlo?
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -1736,7 +1728,7 @@ export function MatchDetailClient({
           <AlertDialogHeader>
             <AlertDialogTitle>Abandonar partido</AlertDialogTitle>
             <AlertDialogDescription>
-              Seguro que queres abandonar este partido?
+              Seguro que querés abandonar este partido?
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
