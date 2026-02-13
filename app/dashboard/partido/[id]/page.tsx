@@ -26,6 +26,7 @@ interface Participant {
   name: string
   phone_last_four: string
   role: 'PLAYER' | 'SUBSTITUTE'
+  gender: 'MALE' | 'FEMALE' | 'OTHER'
   team: 'A' | 'B' | null
   team_number: number | null
   has_paid?: boolean | null
@@ -95,7 +96,8 @@ async function getParticipants(matchId: number, includePayments: boolean): Promi
       mp.user_id,
       u.name,
       u.phone_last_four,
-      CASE WHEN mp.role = 'EXTRA' THEN 'SUBSTITUTE' ELSE mp.role::text END AS role,
+      u.gender,
+      mp.role,
       mp.team,
       mp.team_number,
       NULL::boolean AS has_paid,

@@ -17,12 +17,14 @@ import { Badge } from '@/components/ui/badge'
 import { cn } from '@/lib/utils'
 import { Shield } from 'lucide-react'
 import { InlineLoader } from '@/components/football-loader'
+import { GenderIcon, type Gender } from '@/lib/gender'
 
 interface Participant {
   id: number
   user_id: number
   name: string
   phone_last_four: string
+  gender: Gender
   role: 'PLAYER' | 'SUBSTITUTE'
   team: 'A' | 'B' | null
   team_number?: number | null
@@ -242,7 +244,10 @@ export function TeamAssignment({
             <InlineLoader size="sm" className="shrink-0" />
           ) : null}
           <span className="min-w-0 w-full truncate text-sm md:text-[13px] md:w-auto md:flex-1">
-            {participant.name}
+            <span className="inline-flex items-center gap-1">
+              <GenderIcon gender={participant.gender} className="w-3.5 h-3.5 shrink-0" />
+              <span className="truncate">{participant.name}</span>
+            </span>
           </span>
           <span className="text-muted-foreground text-[10px] md:text-[10px] flex items-center gap-1">
             ({participant.phone_last_four})
@@ -303,6 +308,7 @@ export function TeamAssignment({
           colors && `${colors.border} ${colors.bg}`
         )}
       >
+        <GenderIcon gender={participant.gender} className="w-3.5 h-3.5 shrink-0" />
         <span className="truncate max-w-[150px]">{participant.name}</span>
         <span className="text-muted-foreground text-[10px] shrink-0">({participant.phone_last_four})</span>
       </Badge>

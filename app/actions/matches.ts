@@ -315,24 +315,101 @@ export async function randomizeTeams(matchId: number) {
   
   const teamCount = match[0]?.team_count || 2
 
+  type UserGender = 'MALE' | 'FEMALE' | 'OTHER'
+  type PlayerRow = { id: number; gender: UserGender }
+
+  function shuffle<T>(input: T[]): T[] {
+    const arr = [...input]
+    for (let i = arr.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1))
+      const tmp = arr[i]
+      arr[i] = arr[j]
+      arr[j] = tmp
+    }
+    return arr
+  }
+
+  function pickRandomIndex(indices: number[]): number {
+    return indices[Math.floor(Math.random() * indices.length)]
+  }
+
   try {
-    // Get all players (not substitutes)
-    const players = await sql`
-      SELECT id FROM match_participants 
-      WHERE match_id = ${matchId} AND role = 'PLAYER'
-      ORDER BY RANDOM()
+    // Get all players (not substitutes) + their gender
+    const playersRaw = await sql`
+      SELECT mp.id, u.gender
+      FROM match_participants mp
+      JOIN users u ON mp.user_id = u.id
+      WHERE mp.match_id = ${matchId} AND mp.role = 'PLAYER'
     `
 
-    // Assign half to A, half to B
-    const half = Math.ceil(players.length / 2)
-    
-    for (let i = 0; i < players.length; i++) {
-      const team = i < half ? 'A' : 'B'
-      await sql`
-        UPDATE match_participants 
-        SET team = ${team}
-        WHERE id = ${players[i].id}
-      `
+    const players = playersRaw as PlayerRow[]
+
+    // Clear previous assignments
+    await sql`
+      UPDATE match_participants
+      SET team = NULL, team_number = NULL
+      WHERE match_id = ${matchId} AND role = 'PLAYER'
+    `
+
+    const tc = Math.max(2, Number(teamCount) || 2)
+    const teamIndices = Array.from({ length: tc }, (_, i) => i)
+
+    const females = shuffle(players.filter(p => p.gender === 'FEMALE'))
+    const others = shuffle(players.filter(p => p.gender === 'OTHER'))
+    const males = shuffle(players.filter(p => p.gender !== 'FEMALE' && p.gender !== 'OTHER'))
+
+    const teamTotalCounts = Array.from({ length: tc }, () => 0)
+    const teamFemaleCounts = Array.from({ length: tc }, () => 0)
+    const teamOtherCounts = Array.from({ length: tc }, () => 0)
+
+    const assignments = new Map<number, number>()
+
+    const selectTeamForGroup = (groupCounts: number[]): number => {
+      const minGroup = Math.min(...groupCounts)
+      const groupCandidates = teamIndices.filter(t => groupCounts[t] === minGroup)
+      const minTotal = Math.min(...groupCandidates.map(t => teamTotalCounts[t]))
+      const totalCandidates = groupCandidates.filter(t => teamTotalCounts[t] === minTotal)
+      return pickRandomIndex(totalCandidates)
+    }
+
+    const assignGroup = (group: PlayerRow[], groupCounts: number[]) => {
+      for (const p of group) {
+        const teamIndex = selectTeamForGroup(groupCounts)
+        assignments.set(p.id, teamIndex)
+        teamTotalCounts[teamIndex] += 1
+        groupCounts[teamIndex] += 1
+      }
+    }
+
+    // Balance females first (requirement), then others, then fill remaining randomly while keeping team sizes balanced.
+    assignGroup(females, teamFemaleCounts)
+    assignGroup(others, teamOtherCounts)
+
+    for (const p of males) {
+      const minTotal = Math.min(...teamTotalCounts)
+      const candidates = teamIndices.filter(t => teamTotalCounts[t] === minTotal)
+      const teamIndex = pickRandomIndex(candidates)
+      assignments.set(p.id, teamIndex)
+      teamTotalCounts[teamIndex] += 1
+    }
+
+    // Persist assignments
+    for (const [participantId, teamIndex] of assignments.entries()) {
+      if (tc === 2) {
+        const team = teamIndex === 0 ? 'A' as const : 'B' as const
+        await sql`
+          UPDATE match_participants
+          SET team = ${team}, team_number = NULL
+          WHERE id = ${participantId}
+        `
+      } else {
+        const teamNumber = teamIndex + 1
+        await sql`
+          UPDATE match_participants
+          SET team = NULL, team_number = ${teamNumber}
+          WHERE id = ${participantId}
+        `
+      }
     }
 
     revalidatePath(`/dashboard/partido/${matchId}`)
@@ -435,7 +512,7 @@ export async function getAllUsers() {
 
   try {
     const users = await sql`
-      SELECT id, name, phone_last_four 
+      SELECT id, name, phone_last_four, gender
       FROM users 
       WHERE is_approved = true
       ORDER BY name ASC

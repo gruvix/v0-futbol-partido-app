@@ -1,12 +1,23 @@
+
 'use server'
 
 import { registerUser, loginUser, destroySession, getSession, isApprovalRequired } from '@/lib/auth'
 import { redirect } from 'next/navigation'
 
+type RegistrationGender = 'male' | 'female' | 'other'
+
+function parseGender(input: FormDataEntryValue | null): 'MALE' | 'FEMALE' | 'OTHER' {
+  const value = (typeof input === 'string' ? input : '').toLowerCase() as RegistrationGender
+  if (value === 'female') return 'FEMALE'
+  if (value === 'other') return 'OTHER'
+  return 'MALE'
+}
+
 export async function register(formData: FormData) {
   const name = formData.get('name') as string
   const phoneLast4 = formData.get('phoneLast4') as string
   const password = formData.get('password') as string
+  const gender = parseGender(formData.get('gender'))
 
   if (!name || !phoneLast4 || !password) {
     return { error: 'Todos los campos son requeridos' }
@@ -21,7 +32,7 @@ export async function register(formData: FormData) {
   }
 
   try {
-    const result = await registerUser(name.trim(), phoneLast4, password)
+    const result = await registerUser(name.trim(), phoneLast4, password, gender)
     
     if (result.pending) {
       return { success: true, pending: true, message: 'Solicitud enviada. Un administrador debe aprobar tu cuenta.' }

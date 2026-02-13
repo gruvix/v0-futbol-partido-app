@@ -7,6 +7,8 @@ const SESSION_DURATION_DAYS = 30
 // Set REQUIRE_APPROVAL=true to enable manual approval for new users
 const REQUIRE_APPROVAL = process.env.REQUIRE_APPROVAL === 'true'
 
+export type UserGender = 'MALE' | 'FEMALE' | 'OTHER'
+
 export async function hashPassword(password: string): Promise<string> {
   return bcrypt.hash(password, 12)
 }
@@ -50,7 +52,7 @@ export async function getSession() {
   if (!token) return null
 
   const sessions = await sql`
-    SELECT s.*, u.id as user_id, u.name, u.phone_last_four, u.is_approved
+    SELECT s.*, u.id as user_id, u.name, u.phone_last_four, u.is_approved, u.gender
     FROM sessions s
     JOIN users u ON s.user_id = u.id
     WHERE s.token = ${token} AND s.expires_at > NOW()
@@ -63,6 +65,7 @@ export async function getSession() {
     name: sessions[0].name,
     phoneLast4: sessions[0].phone_last_four,
     isApproved: sessions[0].is_approved,
+    gender: sessions[0].gender as UserGender,
   }
 }
 
@@ -76,7 +79,12 @@ export async function destroySession() {
   }
 }
 
-export async function registerUser(name: string, phoneLast4: string, password: string) {
+export async function registerUser(
+  name: string,
+  phoneLast4: string,
+  password: string,
+  gender: UserGender,
+) {
   const passwordHash = await hashPassword(password)
 
   // Check if user already exists
@@ -100,16 +108,16 @@ export async function registerUser(name: string, phoneLast4: string, password: s
 
     // Create pending user
     await sql`
-      INSERT INTO pending_users (name, phone_last_four, password_hash)
-      VALUES (${name}, ${phoneLast4}, ${passwordHash})
+      INSERT INTO pending_users (name, phone_last_four, password_hash, gender)
+      VALUES (${name}, ${phoneLast4}, ${passwordHash}, ${gender})
     `
 
     return { pending: true }
   } else {
     // Create user directly (no approval needed)
     const result = await sql`
-      INSERT INTO users (name, phone_last_four, password_hash, is_approved)
-      VALUES (${name}, ${phoneLast4}, ${passwordHash}, true)
+      INSERT INTO users (name, phone_last_four, password_hash, gender, is_approved)
+      VALUES (${name}, ${phoneLast4}, ${passwordHash}, ${gender}, true)
       RETURNING id
     `
     
