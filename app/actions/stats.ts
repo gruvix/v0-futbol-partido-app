@@ -4,7 +4,22 @@ import { revalidatePath } from 'next/cache'
 import { getSession } from '@/lib/auth'
 import { sql } from '@/lib/db'
 
-export async function getUsersWithStats() {
+export const MIN_STAT_VALUE = 0
+export const MAX_STAT_VALUE = 10
+
+export interface StatsUser {
+  id: number
+  name: string
+  phone_last_four: string
+  pac: number
+  sho: number
+  pas: number
+  dri: number
+  def: number
+  phy: number
+}
+
+export async function getUsersWithStats(): Promise<{ error?: string; users: StatsUser[] }> {
   const session = await getSession()
   if (!session?.admin) {
     return { error: 'No autorizado', users: [] }
@@ -27,12 +42,12 @@ export async function getUsersWithStats() {
     ORDER BY u.name ASC
   `
 
-  return { users }
+  return { users: users as StatsUser[] }
 }
 
 function clampStat(value: number): number {
   if (!Number.isFinite(value)) return 5
-  return Math.max(0, Math.min(10, Math.round(value)))
+  return Math.max(MIN_STAT_VALUE, Math.min(MAX_STAT_VALUE, Math.round(value)))
 }
 
 export async function saveUserStats(formData: FormData): Promise<void> {
