@@ -27,18 +27,18 @@ export function StatsUserCard({ user }: { user: StatsUser }) {
   })
 
   return (
-    <Card>
+    <Card className="w-full">
       <CardHeader className="pb-2">
         <p className="font-medium text-foreground">
           {user.name} <span className="text-muted-foreground text-sm">({user.phone_last_four})</span>
         </p>
       </CardHeader>
-      <CardContent>
-        <form action={saveUserStats} className="flex flex-col gap-3">
+      <CardContent className="overflow-hidden">
+        <form action={saveUserStats} className="flex flex-col gap-3 w-full min-w-0">
           <input type="hidden" name="userId" value={String(user.id)} />
           {STAT_FIELDS.map((stat) => (
-            <div key={stat.key} className="grid grid-cols-[auto_1fr_auto] items-center gap-2">
-              <label htmlFor={`${stat.key}-${user.id}`} className="text-xs text-muted-foreground min-w-[76px]">
+            <div key={stat.key} className="grid grid-cols-[72px_minmax(0,1fr)_24px] items-center gap-2 w-full min-w-0">
+              <label htmlFor={`${stat.key}-${user.id}`} className="text-xs text-muted-foreground">
                 <span className="font-semibold text-foreground">{stat.code}</span> {stat.label}
               </label>
               <input
@@ -49,12 +49,13 @@ export function StatsUserCard({ user }: { user: StatsUser }) {
                 step={1}
                 name={stat.key}
                 value={values[stat.key]}
+                className="w-full min-w-0 max-w-full"
                 onChange={(event) => setValues((prev) => ({ ...prev, [stat.key]: Number(event.target.value) }))}
               />
               <span className="text-sm font-semibold w-6 text-right">{values[stat.key]}</span>
             </div>
           ))}
-          <Button type="submit" size="sm">Guardar</Button>
+          <Button type="submit" size="sm" className="w-full">Guardar</Button>
         </form>
       </CardContent>
     </Card>
