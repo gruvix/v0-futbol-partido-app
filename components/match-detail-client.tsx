@@ -1,12 +1,13 @@
 'use client'
 
-import { useState } from 'react'
+import { useCallback, useEffect, useRef, useState, type KeyboardEvent } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
+import { Textarea } from '@/components/ui/textarea'
 import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
@@ -17,15 +18,18 @@ import {
   Users,
   Shuffle,
   Trash2,
-  UserPlus,
-  UserMinus,
   Share2,
   Globe,
   Lock,
   ChevronLeft,
   ChevronRight,
   Pencil,
+  Save,
+  Wallet,
+  UserRoundPlus,
+  UserRoundMinus,
 } from 'lucide-react'
+import { GenderIcon, type Gender } from '@/lib/gender'
 import {
   joinMatch,
   leaveMatch,
@@ -39,6 +43,9 @@ import {
   addMatchAdmin,
   removeMatchAdmin,
   changeParticipantRole,
+  setParticipantPaymentStatus,
+  updateMatchFieldRentTotal,
+  updateParticipantPaymentNotes,
 } from '@/app/actions/matches'
 import { TeamAssignment } from '@/components/team-assignment'
 import { InvitePlayersDialog } from '@/components/invite-players-dialog'
@@ -62,6 +69,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
+import { cn } from '@/lib/utils'
 
 interface Match {
   id: number
@@ -77,6 +85,7 @@ interface Match {
   team_size: number
   max_players: number
   invites_per_player: number | null
+  field_rent_total: number | null
 }
 
 interface Participant {
@@ -84,9 +93,14 @@ interface Participant {
   user_id: number
   name: string
   phone_last_four: string
-  role: 'PLAYER' | 'SUBSTITUTE' | 'EXTRA'
+  role: 'PLAYER' | 'SUBSTITUTE'
+  gender: Gender
   team: 'A' | 'B' | null
   team_number: number | null
+  // When the viewer is not subscribed to the match, the server does not
+  // include payment info to avoid leaking it.
+  has_paid?: boolean | null
+  payment_notes?: string | null
 }
 
 interface Admin {
@@ -130,7 +144,6 @@ export function MatchDetailClient({
   currentUserId,
 }: MatchDetailClientProps) {
   const [loading, setLoading] = useState<string | null>(null)
-  const [_error, setError] = useState('')
   const [showInviteDialog, setShowInviteDialog] = useState(false)
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
   const [showLastPlayerConfirm, setShowLastPlayerConfirm] = useState(false)
@@ -151,6 +164,22 @@ export function MatchDetailClient({
   const { showLoader, hideLoader } = useActionLoader()
   const { showError } = useErrorToast()
 
+  function formatCurrencyARS(value: number): string {
+    return new Intl.NumberFormat('es-AR', {
+      style: 'currency',
+      currency: 'ARS',
+      maximumFractionDigits: 0,
+    }).format(value)
+  }
+
+  function roundUpToPeso(value: number): number {
+    return Math.ceil(value)
+  }
+
+  function onlyDigits(value: string): string {
+    return value.replace(/\D+/g, '')
+  }
+
   function computedMaxPlayersValue(teamCount: number, teamSize: number): number {
     return Math.max(1, teamCount) * Math.max(1, teamSize)
   }
@@ -168,6 +197,11 @@ export function MatchDetailClient({
     if (teamCount <= 0) return match.max_players
     return Math.max(1, teamCount) * Math.max(1, teamSize)
   }
+
+  // Max players:
+  // - when teams are enabled, it is derived (team_count * team_size)
+  // - when no teams, it is chosen by creator/admin (match.max_players)
+  const maxPlayers = match.team_count > 0 ? computedMaxPlayers(match.team_count, match.team_size) : match.max_players
 
   // Edit state for each field
   const [editTitle, setEditTitle] = useState(match.title || '')
@@ -238,7 +272,154 @@ export function MatchDetailClient({
 
   const players = effectiveParticipants.filter(p => p.role === 'PLAYER')
   const substitutes = effectiveParticipants.filter(p => p.role === 'SUBSTITUTE')
-  const extras = effectiveParticipants.filter(p => p.role === 'EXTRA')
+
+  const isSubscribed = Boolean(userParticipation)
+  const activePlayersForPayments = players
+  const fieldRentTotal = match.field_rent_total ?? 0
+  const expectedPerPlayer = maxPlayers > 0 ? roundUpToPeso(fieldRentTotal / maxPlayers) : 0
+  const activeCount = activePlayersForPayments.length
+  const perActivePlayer = activeCount > 0 ? roundUpToPeso(fieldRentTotal / activeCount) : 0
+  const paidCount = activePlayersForPayments.filter(p => p.has_paid).length
+
+  const [editFieldRentTotal, setEditFieldRentTotal] = useState<string>(
+    match.field_rent_total === null || match.field_rent_total === undefined ? '' : match.field_rent_total.toString()
+  )
+
+  const fieldRentRaw = editFieldRentTotal.trim()
+  const fieldRentNextParsed = fieldRentRaw === '' ? null : Number.parseInt(fieldRentRaw, 10)
+  const isFieldRentInvalid = fieldRentRaw !== '' && (fieldRentNextParsed === null || !Number.isFinite(fieldRentNextParsed) || fieldRentNextParsed < 0)
+  const currentFieldRentRaw = match.field_rent_total === null || match.field_rent_total === undefined ? '' : match.field_rent_total.toString()
+  const isFieldRentSaveDisabled = isFieldRentInvalid || fieldRentRaw === currentFieldRentRaw
+
+  const [localNotes, setLocalNotes] = useState<Record<number, string>>(() => {
+    const entries = activePlayersForPayments.map(p => [p.id, p.payment_notes ?? ''] as const)
+    return Object.fromEntries(entries)
+  })
+
+  const noteTextareaRefs = useRef<Record<number, HTMLTextAreaElement | null>>({})
+  const [noteIsMultiline, setNoteIsMultiline] = useState<Record<number, boolean>>({})
+
+  const [notesSavingIds, setNotesSavingIds] = useState<Set<number>>(new Set())
+  const [paidSavingIds, setPaidSavingIds] = useState<Set<number>>(new Set())
+
+  useEffect(() => {
+    setEditFieldRentTotal(match.field_rent_total === null || match.field_rent_total === undefined ? '' : match.field_rent_total.toString())
+  }, [match.field_rent_total])
+
+  useEffect(() => {
+    const entries = activePlayersForPayments.map(p => [p.id, p.payment_notes ?? ''] as const)
+    setLocalNotes(Object.fromEntries(entries))
+  }, [participants, players.length])
+
+  const syncNoteTextareaSize = useCallback((participantId: number, el: HTMLTextAreaElement | null): void => {
+    if (!el) return
+
+    // Auto-grow textarea to fit content (including wrapped lines)
+    el.style.overflowY = 'hidden'
+    el.style.height = '0px'
+    el.style.height = `${el.scrollHeight}px`
+
+    const computed = window.getComputedStyle(el)
+    const lineHeightRaw = Number.parseFloat(computed.lineHeight)
+    const paddingTop = Number.parseFloat(computed.paddingTop)
+    const paddingBottom = Number.parseFloat(computed.paddingBottom)
+    const lineHeight = Number.isFinite(lineHeightRaw) ? lineHeightRaw : 20
+    const singleLineHeight = lineHeight + paddingTop + paddingBottom
+    const isMultiline = el.scrollHeight > singleLineHeight + 1
+
+    setNoteIsMultiline(prev => {
+      if (prev[participantId] === isMultiline) return prev
+      return { ...prev, [participantId]: isMultiline }
+    })
+  }, [])
+
+  // Re-evaluate wrapping on resize (textarea can become multiline just by shrinking the row)
+  useEffect(() => {
+    let rafId: number | null = null
+
+    const onResize = (): void => {
+      if (rafId !== null) {
+        window.cancelAnimationFrame(rafId)
+      }
+      rafId = window.requestAnimationFrame(() => {
+        for (const p of activePlayersForPayments) {
+          syncNoteTextareaSize(p.id, noteTextareaRefs.current[p.id])
+        }
+      })
+    }
+
+    window.addEventListener('resize', onResize)
+    return () => {
+      window.removeEventListener('resize', onResize)
+      if (rafId !== null) {
+        window.cancelAnimationFrame(rafId)
+      }
+    }
+  }, [activePlayersForPayments, syncNoteTextareaSize])
+
+  async function handleSaveFieldRentTotal(): Promise<void> {
+    const raw = editFieldRentTotal.trim()
+    const nextParsed = raw === '' ? null : Number.parseInt(raw, 10)
+    if (raw !== '' && (nextParsed === null || !Number.isFinite(nextParsed) || nextParsed < 0)) {
+      showError('Monto invalido', 'Ingresá un numero mayor o igual a 0')
+      return
+    }
+
+    showLoader('Guardando costo de cancha...')
+    const result = await updateMatchFieldRentTotal(match.id, nextParsed)
+    hideLoader()
+    if (result?.error) {
+      showError('Error al intentar actualizar costo de cancha', result.error)
+    } else {
+      router.refresh()
+    }
+  }
+
+  async function handleTogglePaid(participantId: number, hasPaid: boolean): Promise<void> {
+    if (!isAdmin) return
+    setPaidSavingIds(prev => {
+      const next = new Set(prev)
+      next.add(participantId)
+      return next
+    })
+
+    const result = await setParticipantPaymentStatus(match.id, participantId, hasPaid)
+
+    setPaidSavingIds(prev => {
+      const next = new Set(prev)
+      next.delete(participantId)
+      return next
+    })
+
+    if (result?.error) {
+      showError('Error al intentar actualizar pago', result.error)
+    } else {
+      router.refresh()
+    }
+  }
+
+  async function handleSaveNotes(participantId: number): Promise<void> {
+    const note = (localNotes[participantId] ?? '').trimEnd()
+    setNotesSavingIds(prev => {
+      const next = new Set(prev)
+      next.add(participantId)
+      return next
+    })
+
+    const result = await updateParticipantPaymentNotes(match.id, participantId, note)
+
+    setNotesSavingIds(prev => {
+      const next = new Set(prev)
+      next.delete(participantId)
+      return next
+    })
+
+    if (result?.error) {
+      showError('Error al intentar actualizar notas', result.error)
+    } else {
+      router.refresh()
+    }
+  }
 
   const getParticipantTeamNumber = (participant: Participant): number | null => {
     if (participant.team_number !== null && participant.team_number !== undefined) {
@@ -280,11 +461,6 @@ export function MatchDetailClient({
   const selectedParticipant = selectedParticipantId
     ? effectiveParticipants.find(p => p.id === selectedParticipantId) || null
     : null
-
-  // Max players:
-  // - when teams are enabled, it is derived (team_count * team_size)
-  // - when no teams, it is chosen by creator/admin (match.max_players)
-  const maxPlayers = match.team_count > 0 ? computedMaxPlayers(match.team_count, match.team_size) : match.max_players
 
   const [pendingTeamSettings, setPendingTeamSettings] = useState<{
     teamCount: number
@@ -352,9 +528,9 @@ export function MatchDetailClient({
   const canEditGoForward = editWeekOffset < 4
   const canEditGoBack = editWeekOffset > 0
 
-  async function handleJoin(role: 'PLAYER' | 'SUBSTITUTE' | 'EXTRA') {
+  async function handleJoin(role: 'PLAYER' | 'SUBSTITUTE') {
     setLoading(`join-${role}`)
-    const roleLabels: Record<string, string> = { PLAYER: 'Jugador', SUBSTITUTE: 'Suplente', EXTRA: 'Por las dudas' }
+    const roleLabels: Record<'PLAYER' | 'SUBSTITUTE', string> = { PLAYER: 'Jugador', SUBSTITUTE: 'Suplente' }
     showLoader(`Anotandote como ${roleLabels[role]}...`)
     const result = await joinMatch(match.id, role)
     hideLoader()
@@ -1220,31 +1396,21 @@ export function MatchDetailClient({
                   {loading === 'join-PLAYER' ? (
                     <InlineLoader size="sm" />
                   ) : (
-                    <UserPlus className="w-4 h-4" />
+                    <UserRoundPlus className="w-4 h-4" />
                   )}
-                  Anotarme
+                  Anotarme como jugador
                 </Button>
                 <Button
-                  variant="secondary"
+                  variant="outline"
                   onClick={() => handleJoin('SUBSTITUTE')}
                   disabled={isLoading}
                 >
                   {loading === 'join-SUBSTITUTE' ? (
                     <InlineLoader size="sm" />
                   ) : (
-                    'Como suplente'
+                    <UserRoundPlus className="w-4 h-4" />
                   )}
-                </Button>
-                <Button
-                  variant="outline"
-                  onClick={() => handleJoin('EXTRA')}
-                  disabled={isLoading}
-                >
-                  {loading === 'join-EXTRA' ? (
-                    <InlineLoader size="sm" />
-                  ) : (
-                    'Por las dudas'
-                  )}
+                  Anotarme como suplente
                 </Button>
               </div>
             </div>
@@ -1307,19 +1473,6 @@ export function MatchDetailClient({
               matchCreatorId={match.created_by_user_id}
               loadingParticipantIds={loadingParticipantIds}
             />
-
-            {extras.length > 0 && (
-              <div className="flex flex-col gap-2">
-                <h4 className="text-sm font-medium text-muted-foreground">Por las dudas ({extras.length})</h4>
-                <div className="flex flex-wrap gap-2">
-                  {extras.map((p) => (
-                    <Badge key={p.id} variant="outline" className="py-1.5 px-3">
-                      {p.name} ({p.phone_last_four})
-                    </Badge>
-                  ))}
-                </div>
-              </div>
-            )}
           </div>
 
           {/* Bottom actions - leave button moved here */}
@@ -1352,7 +1505,7 @@ export function MatchDetailClient({
                     {loading === 'leave' ? (
                       <InlineLoader size="sm" />
                     ) : (
-                      <UserMinus className="w-4 h-4" />
+                      <UserRoundMinus className="w-4 h-4" />
                     )}
                     Abandonar partido
                   </Button>
@@ -1360,6 +1513,167 @@ export function MatchDetailClient({
               </div>
             </div>
           )}
+
+          {/* Payments agenda (only visible for subscribed users) */}
+          {isSubscribed ? (
+            <div className="flex flex-col gap-3 p-3 rounded-lg border border-border bg-muted/30">
+              <div className="flex items-center justify-between gap-2 flex-wrap">
+                <div className="flex items-center gap-2">
+                  <Wallet className="w-4 h-4 text-primary" />
+                  <span className="font-medium text-sm text-foreground">Pagos</span>
+                  {fieldRentTotal > 0 ? (
+                    <Badge variant="secondary" className="text-xs">
+                      {paidCount}/{activeCount}
+                    </Badge>
+                  ) : null}
+                </div>
+
+                <div className="flex items-center gap-3 flex-wrap">
+                  {fieldRentTotal > 0 ? (
+                    <div className="flex items-start gap-2 text-xs text-muted-foreground">
+                      <span className="whitespace-nowrap">Precio por jugador</span>
+                      <div className="flex flex-col leading-tight">
+                        <span>
+                          ({maxPlayers} jugadores):{' '}
+                          <span className="text-foreground font-medium">{formatCurrencyARS(expectedPerPlayer)}</span>
+                        </span>
+                        {activeCount > 0 && expectedPerPlayer !== perActivePlayer ? (
+                          <span>
+                            ({activeCount} jugadores):{' '}
+                            <span className="text-foreground font-medium">{formatCurrencyARS(perActivePlayer)}</span>
+                          </span>
+                        ) : null}
+                      </div>
+                    </div>
+                  ) : null}
+
+                  {isAdmin && !isPast ? (
+                    <div className="relative">
+                      <Input
+                        type="text"
+                        inputMode="numeric"
+                        pattern="[0-9]*"
+                        value={editFieldRentTotal}
+                        onChange={(e) => setEditFieldRentTotal(onlyDigits(e.target.value))}
+                        onKeyDown={(e: KeyboardEvent<HTMLInputElement>) => {
+                          if (e.key !== 'Enter') return
+                          if (isFieldRentSaveDisabled) return
+                          e.preventDefault()
+                          void handleSaveFieldRentTotal()
+                        }}
+                        placeholder="Costo total"
+                        className="w-36 pr-9"
+                      />
+                      <button
+                        type="button"
+                        aria-label="Guardar costo"
+                        onClick={handleSaveFieldRentTotal}
+                        disabled={isFieldRentSaveDisabled}
+                        className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground disabled:opacity-40"
+                      >
+                        <Save className="w-4 h-4" />
+                      </button>
+                    </div>
+                  ) : (
+                    <span className="text-sm text-muted-foreground">
+                      Costo de cancha: {fieldRentTotal > 0 ? formatCurrencyARS(fieldRentTotal) : '—'}
+                    </span>
+                  )}
+                </div>
+              </div>
+
+              {activePlayersForPayments.length === 0 ? (
+                <span className="text-sm text-muted-foreground">No hay jugadores activos para calcular pagos.</span>
+              ) : (
+                <div className="flex flex-col gap-1">
+                  {activePlayersForPayments.map(p => {
+                    const canEditThisNote = (isAdmin || p.user_id === currentUserId) && !isPast
+                    const isSavingPaid = paidSavingIds.has(p.id)
+                    const isSavingNote = notesSavingIds.has(p.id)
+                    const currentNote = p.payment_notes ?? ''
+                    const draft = localNotes[p.id] ?? ''
+                    const hasNoteChanges = draft !== currentNote
+                    const isMultiline = Boolean(noteIsMultiline[p.id])
+
+                    return (
+                      <div
+                        key={p.id}
+                        className="py-1"
+                      >
+                        <div className="flex items-start gap-2">
+                          <input
+                            type="checkbox"
+                            checked={Boolean(p.has_paid)}
+                            onChange={(e) => handleTogglePaid(p.id, e.target.checked)}
+                            disabled={!isAdmin || isPast || isSavingPaid}
+                            className="h-4 w-4 mt-1 accent-primary disabled:opacity-50"
+                            aria-label={`Pago de ${p.name}`}
+                          />
+
+                          <div
+                            className={cn(
+                              'min-w-0 flex-1 flex flex-col gap-1',
+                              // Small screens: always stacked. Larger screens: keep inline unless the note wraps.
+                              !isMultiline && 'sm:flex-row sm:items-center sm:gap-2',
+                            )}
+                          >
+                            <div className="min-w-0 flex items-center gap-1">
+                              <span className="text-sm font-medium truncate">{p.name}</span>
+                              <span className="text-sm text-muted-foreground truncate">({p.phone_last_four})</span>
+                            </div>
+
+                            <div
+                              className={cn(
+                                'min-w-0 flex flex-col gap-1',
+                                !isMultiline && 'sm:flex-1 sm:flex-row sm:items-center sm:gap-2',
+                              )}
+                            >
+                              <div className={cn('relative min-w-0', !isMultiline && 'sm:flex-1')}>
+                                <Textarea
+                                  ref={(el) => {
+                                    noteTextareaRefs.current[p.id] = el
+                                    syncNoteTextareaSize(p.id, el)
+                                  }}
+                                  rows={1}
+                                  placeholder={`Notas de ${p.name}...`}
+                                  value={draft}
+                                  onChange={(e) => {
+                                    const next = e.target.value
+                                    setLocalNotes(prev => ({ ...prev, [p.id]: next }))
+                                    syncNoteTextareaSize(p.id, e.currentTarget)
+                                  }}
+                                  onKeyDown={(e: KeyboardEvent<HTMLTextAreaElement>) => {
+                                    if (e.key !== 'Enter') return
+                                    if (!canEditThisNote || isSavingNote || !hasNoteChanges) return
+                                    e.preventDefault()
+                                    void handleSaveNotes(p.id)
+                                  }}
+                                  disabled={!canEditThisNote || isSavingNote}
+                                  className="min-h-8 resize-none overflow-hidden pr-9 py-1.5 placeholder:text-muted-foreground/80"
+                                />
+                                <button
+                                  type="button"
+                                  aria-label={`Guardar notas de ${p.name}`}
+                                  onClick={() => handleSaveNotes(p.id)}
+                                  disabled={!canEditThisNote || isSavingNote || !hasNoteChanges}
+                                  className={cn(
+                                    'absolute right-2 text-muted-foreground hover:text-foreground disabled:opacity-40',
+                                    isMultiline ? 'top-2' : 'top-1/2 -translate-y-1/2',
+                                  )}
+                                >
+                                  {isSavingNote ? <InlineLoader size="sm" /> : <Save className="w-4 h-4" />}
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
+            </div>
+          ) : null}
         </CardContent>
       </Card>
 
@@ -1396,7 +1710,7 @@ export function MatchDetailClient({
           <AlertDialogHeader>
             <AlertDialogTitle>Sos el ultimo anotado</AlertDialogTitle>
             <AlertDialogDescription>
-              Ya no queda nadie mas en este partido. Queres eliminarlo?
+              Ya no queda nadie mas en este partido. Querés eliminarlo?
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -1414,7 +1728,7 @@ export function MatchDetailClient({
           <AlertDialogHeader>
             <AlertDialogTitle>Abandonar partido</AlertDialogTitle>
             <AlertDialogDescription>
-              Seguro que queres abandonar este partido?
+              Seguro que querés abandonar este partido?
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -1430,10 +1744,10 @@ export function MatchDetailClient({
       <AlertDialog open={showTeamResetWarning !== null} onOpenChange={() => setShowTeamResetWarning(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Cambiar configuracion de equipos</AlertDialogTitle>
+            <AlertDialogTitle>Cambiar configuración de equipos</AlertDialogTitle>
             <AlertDialogDescription>
-              Cambiar la configuracion de equipos va a quitar las asignaciones actuales (equipos) de todos los jugadores.
-              Podras rearmarlos despues. Queres continuar?
+              Cambiar la configuración de equipos va a quitar las asignaciones actuales (equipos) de todos los jugadores.
+              Podrás rearmarlos después. Queres continuar?
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -1479,7 +1793,14 @@ export function MatchDetailClient({
         <DialogContent showCloseButton={false}>
           <DialogHeader className="gap-2">
             <div className="flex items-center justify-between">
-              <DialogTitle className="truncate">{selectedParticipant?.name ?? ''}</DialogTitle>
+              <DialogTitle className="truncate">
+                <span className="inline-flex items-center gap-1">
+                  {selectedParticipant ? (
+                    <GenderIcon gender={selectedParticipant.gender} className="w-4 h-4 shrink-0" />
+                  ) : null}
+                  <span>{selectedParticipant?.name ?? ''}</span>
+                </span>
+              </DialogTitle>
               <button
                 type="button"
                 className="text-muted-foreground hover:text-foreground shrink-0"

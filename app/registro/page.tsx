@@ -112,6 +112,43 @@ export default function RegistroPage() {
                 </p>
               </div>
 
+              <div className="flex flex-col gap-2">
+                <Label>Genero</Label>
+                <div className="flex flex-col gap-2">
+                  <label className="flex items-center gap-2 p-2 rounded-lg border border-border hover:bg-muted/50 transition-colors cursor-pointer">
+                    <input
+                      type="radio"
+                      name="gender"
+                      value="male"
+                      defaultChecked
+                      disabled={loading}
+                    />
+                    <span className="text-sm text-foreground">Masculino</span>
+                  </label>
+                  <label className="flex items-center gap-2 p-2 rounded-lg border border-border hover:bg-muted/50 transition-colors cursor-pointer">
+                    <input
+                      type="radio"
+                      name="gender"
+                      value="female"
+                      disabled={loading}
+                    />
+                    <span className="text-sm text-foreground">Femenino</span>
+                  </label>
+                  <label className="flex items-center gap-2 p-2 rounded-lg border border-border hover:bg-muted/50 transition-colors cursor-pointer">
+                    <input
+                      type="radio"
+                      name="gender"
+                      value="other"
+                      disabled={loading}
+                    />
+                    <span className="text-sm text-foreground">Otro / no binario</span>
+                  </label>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Este campo se usa para mejorar el balanceo al armar equipos. Se sugiere usar tu genero biologico, pero sos libre de elegir lo que quieras.
+                </p>
+              </div>
+
               {/* errors are shown via ErrorToastProvider */}
 
               <Button type="submit" className="w-full" disabled={loading}>

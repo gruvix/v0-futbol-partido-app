@@ -20,9 +20,15 @@ export async function initializeDatabase() {
   } catch {
     // Type already exists
   }
+
+  try {
+    await sql`CREATE TYPE user_gender AS ENUM ('MALE', 'FEMALE', 'OTHER')`
+  } catch {
+    // Type already exists
+  }
   
   try {
-    await sql`CREATE TYPE participant_role AS ENUM ('PLAYER', 'SUBSTITUTE', 'EXTRA')`
+    await sql`CREATE TYPE participant_role AS ENUM ('PLAYER', 'SUBSTITUTE')`
   } catch {
     // Type already exists
   }
@@ -41,6 +47,7 @@ export async function initializeDatabase() {
       phone_last_four VARCHAR(4) NOT NULL,
       password_hash VARCHAR(255) NOT NULL,
       admin BOOLEAN DEFAULT false,
+      gender user_gender NOT NULL DEFAULT 'MALE',
       is_approved BOOLEAN DEFAULT true,
       created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
       updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
@@ -54,6 +61,7 @@ export async function initializeDatabase() {
       name VARCHAR(255) NOT NULL,
       phone_last_four VARCHAR(4) NOT NULL,
       password_hash VARCHAR(255) NOT NULL,
+      gender user_gender NOT NULL DEFAULT 'MALE',
       created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
       UNIQUE(name, phone_last_four)
     )
@@ -84,6 +92,7 @@ export async function initializeDatabase() {
       team_size INTEGER DEFAULT 5,
       max_players INTEGER DEFAULT 10,
       invites_per_player INTEGER,
+      field_rent_total INTEGER,
       created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
     )
   `
@@ -112,7 +121,11 @@ export async function initializeDatabase() {
   `
   
   // Add columns if they don't exist (for existing databases)
+  // Note: match_participants might not exist yet, so keep those ALTERs isolated.
   try {
+    await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS gender user_gender NOT NULL DEFAULT 'MALE'`
+    await sql`ALTER TABLE pending_users ADD COLUMN IF NOT EXISTS gender user_gender NOT NULL DEFAULT 'MALE'`
+
     await sql`ALTER TABLE matches ADD COLUMN IF NOT EXISTS title VARCHAR(100)`
     await sql`ALTER TABLE matches ADD COLUMN IF NOT EXISTS emoji VARCHAR(10)`
     await sql`ALTER TABLE matches ADD COLUMN IF NOT EXISTS is_public BOOLEAN DEFAULT true`
@@ -123,8 +136,17 @@ export async function initializeDatabase() {
     await sql`ALTER TABLE matches ADD COLUMN IF NOT EXISTS invites_per_player INTEGER`
     await sql`ALTER TABLE match_participants ADD COLUMN IF NOT EXISTS team_number INTEGER`
     await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS admin BOOLEAN DEFAULT false`
+    await sql`ALTER TABLE matches ADD COLUMN IF NOT EXISTS field_rent_total INTEGER`
   } catch {
     // Columns might already exist
+  }
+
+  try {
+    await sql`ALTER TABLE match_participants ADD COLUMN IF NOT EXISTS team_number INTEGER`
+    await sql`ALTER TABLE match_participants ADD COLUMN IF NOT EXISTS has_paid BOOLEAN DEFAULT false`
+    await sql`ALTER TABLE match_participants ADD COLUMN IF NOT EXISTS payment_notes TEXT`
+  } catch {
+    // Table might not exist yet
   }
 
   await sql`
@@ -134,6 +156,9 @@ export async function initializeDatabase() {
       user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
       role participant_role NOT NULL DEFAULT 'PLAYER',
       team team_side,
+      team_number INTEGER,
+      has_paid BOOLEAN DEFAULT false,
+      payment_notes TEXT,
       created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
       UNIQUE(match_id, user_id)
     )
@@ -152,6 +177,42 @@ export async function initializeDatabase() {
       updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
     )
   `
+  // Backward compatibility:
+  // Old DBs may already have participant_role including 'EXTRA'. We want to:
+  // 1) migrate any existing rows role=EXTRA -> SUBSTITUTE
+  // 2) rebuild the enum without EXTRA (safest cross-version approach)
+  try {
+    await sql`
+      DO $$
+      BEGIN
+        IF EXISTS (
+          SELECT 1
+          FROM pg_type t
+          JOIN pg_enum e ON t.oid = e.enumtypid
+          WHERE t.typname = 'participant_role'
+            AND e.enumlabel = 'EXTRA'
+        ) THEN
+          -- Data migration
+          UPDATE match_participants SET role = 'SUBSTITUTE' WHERE role = 'EXTRA';
+
+          -- Rebuild enum without EXTRA
+          CREATE TYPE participant_role_new AS ENUM ('PLAYER', 'SUBSTITUTE');
+
+          ALTER TABLE match_participants
+            ALTER COLUMN role TYPE text;
+
+          ALTER TABLE match_participants
+            ALTER COLUMN role TYPE participant_role_new
+            USING role::participant_role_new;
+
+          DROP TYPE participant_role;
+          ALTER TYPE participant_role_new RENAME TO participant_role;
+        END IF;
+      END $$;
+    `
+  } catch {
+    // Ignore: migration is best-effort (permissions/pg version differences/etc)
+  }
 
   // Create indexes
   await sql`CREATE INDEX IF NOT EXISTS idx_sessions_user_id ON sessions(user_id)`
