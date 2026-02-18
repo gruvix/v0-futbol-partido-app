@@ -589,6 +589,7 @@ export async function invitePlayer(matchId: number, userId: number, role: 'PLAYE
 
     if (role === 'PLAYER') {
       await autoBalanceTeamsIfFull(matchId)
+    }
     if (inserted.length === 0) {
       return { error: 'El partido ya está lleno' }
     }
@@ -1008,6 +1009,7 @@ export async function changeParticipantRole(matchId: number, participantId: numb
     `
     if (newRole === 'PLAYER') {
       await autoBalanceTeamsIfFull(matchId)
+    }
 
     if (updated.length === 0 && newRole === 'PLAYER') {
       return { error: 'El partido ya está lleno' }
