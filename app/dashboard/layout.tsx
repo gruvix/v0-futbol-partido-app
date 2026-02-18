@@ -30,7 +30,7 @@ export default async function DashboardLayout({
       <ErrorToastProvider>
         <div className="min-h-screen bg-background">
           <RouteLoader />
-          <DashboardNav userName={session.name} />
+          <DashboardNav userName={session.name} isAdmin={Boolean(session.admin)} />
           <main className="container mx-auto px-4 py-6 max-w-4xl">
             {children}
           </main>

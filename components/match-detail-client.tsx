@@ -1594,6 +1594,7 @@ export function MatchDetailClient({
                     const draft = localNotes[p.id] ?? ''
                     const hasNoteChanges = draft !== currentNote
                     const isMultiline = Boolean(noteIsMultiline[p.id])
+                    // ...
 
                     return (
                       <div

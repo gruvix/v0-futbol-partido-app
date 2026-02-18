@@ -46,6 +46,7 @@ export async function initializeDatabase() {
       name VARCHAR(255) NOT NULL,
       phone_last_four VARCHAR(4) NOT NULL,
       password_hash VARCHAR(255) NOT NULL,
+      admin BOOLEAN DEFAULT false,
       gender user_gender NOT NULL DEFAULT 'MALE',
       is_approved BOOLEAN DEFAULT true,
       created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
@@ -133,6 +134,8 @@ export async function initializeDatabase() {
     await sql`ALTER TABLE matches ADD COLUMN IF NOT EXISTS field VARCHAR(100)`
     await sql`ALTER TABLE matches ADD COLUMN IF NOT EXISTS max_players INTEGER DEFAULT 10`
     await sql`ALTER TABLE matches ADD COLUMN IF NOT EXISTS invites_per_player INTEGER`
+    await sql`ALTER TABLE match_participants ADD COLUMN IF NOT EXISTS team_number INTEGER`
+    await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS admin BOOLEAN DEFAULT false`
     await sql`ALTER TABLE matches ADD COLUMN IF NOT EXISTS field_rent_total INTEGER`
   } catch {
     // Columns might already exist
@@ -161,6 +164,19 @@ export async function initializeDatabase() {
     )
   `
 
+  await sql`
+    CREATE TABLE IF NOT EXISTS stats (
+      id SERIAL PRIMARY KEY,
+      user_id INTEGER NOT NULL UNIQUE REFERENCES users(id) ON DELETE CASCADE,
+      pac INTEGER NOT NULL DEFAULT 5 CHECK (pac BETWEEN 0 AND 10),
+      sho INTEGER NOT NULL DEFAULT 5 CHECK (sho BETWEEN 0 AND 10),
+      pas INTEGER NOT NULL DEFAULT 5 CHECK (pas BETWEEN 0 AND 10),
+      dri INTEGER NOT NULL DEFAULT 5 CHECK (dri BETWEEN 0 AND 10),
+      def INTEGER NOT NULL DEFAULT 5 CHECK (def BETWEEN 0 AND 10),
+      phy INTEGER NOT NULL DEFAULT 5 CHECK (phy BETWEEN 0 AND 10),
+      updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+    )
+  `
   // Backward compatibility:
   // Old DBs may already have participant_role including 'EXTRA'. We want to:
   // 1) migrate any existing rows role=EXTRA -> SUBSTITUTE
@@ -207,6 +223,7 @@ export async function initializeDatabase() {
   await sql`CREATE INDEX IF NOT EXISTS idx_match_participants_user ON match_participants(user_id)`
   await sql`CREATE INDEX IF NOT EXISTS idx_match_admins_match ON match_admins(match_id)`
   await sql`CREATE INDEX IF NOT EXISTS idx_match_admins_user ON match_admins(user_id)`
+  await sql`CREATE INDEX IF NOT EXISTS idx_stats_user ON stats(user_id)`
 
   return { success: true }
 }
