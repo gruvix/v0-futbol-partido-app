@@ -5,16 +5,11 @@ import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import Link from 'next/link'
 import { Plus, Calendar } from 'lucide-react'
+import type { MatchCountsSummary } from '@/lib/match-summary'
 
-interface Match {
-  id: number
-  title: string | null
-  date_time: string
-  location_type: string
-  location_custom: string | null
+type Match = MatchCountsSummary & {
   created_by_user_id: number
   creator_name: string
-  participant_count: number
   is_public: boolean
   is_registered: boolean
 }
@@ -33,7 +28,12 @@ async function getDashboardMatches(userId: number): Promise<Match[]> {
       m.created_by_user_id,
       m.is_public,
       u.name as creator_name,
-      COUNT(mp_all.id)::int as participant_count,
+      COUNT(mp_all.id) FILTER (
+        WHERE (CASE WHEN mp_all.role = 'EXTRA' THEN 'SUBSTITUTE' ELSE mp_all.role::text END) = 'PLAYER'
+      )::int as player_count,
+      COUNT(mp_all.id) FILTER (
+        WHERE (CASE WHEN mp_all.role = 'EXTRA' THEN 'SUBSTITUTE' ELSE mp_all.role::text END) = 'SUBSTITUTE'
+      )::int as substitute_count,
       EXISTS (
         SELECT 1
         FROM match_participants mp_me

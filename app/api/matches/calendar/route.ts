@@ -1,15 +1,7 @@
 import { NextResponse } from 'next/server'
 import { sql } from '@/lib/db'
 import { getSession } from '@/lib/auth'
-
-interface CalendarMatchSummary {
-  id: number
-  title: string | null
-  date_time: string
-  location_type: string
-  location_custom: string | null
-  participant_count: number
-}
+import type { MatchCountsSummary } from '@/lib/match-summary'
 
 function parseIntParam(value: string | null): number | null {
   if (!value) return null
@@ -45,7 +37,12 @@ export async function GET(request: Request): Promise<NextResponse> {
       m.date_time,
       m.location_type,
       m.location_custom,
-      COUNT(mp_all.id)::int as participant_count
+      COUNT(mp_all.id) FILTER (
+        WHERE (CASE WHEN mp_all.role = 'EXTRA' THEN 'SUBSTITUTE' ELSE mp_all.role::text END) = 'PLAYER'
+      )::int as player_count,
+      COUNT(mp_all.id) FILTER (
+        WHERE (CASE WHEN mp_all.role = 'EXTRA' THEN 'SUBSTITUTE' ELSE mp_all.role::text END) = 'SUBSTITUTE'
+      )::int as substitute_count
     FROM matches m
     LEFT JOIN match_participants mp_all ON m.id = mp_all.match_id
     WHERE
@@ -62,5 +59,5 @@ export async function GET(request: Request): Promise<NextResponse> {
     ORDER BY m.date_time ASC
   `
 
-  return NextResponse.json({ matches: matches as CalendarMatchSummary[] })
+  return NextResponse.json({ matches: matches as MatchCountsSummary[] })
 }

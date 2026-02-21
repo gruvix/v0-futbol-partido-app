@@ -1,17 +1,9 @@
 import { CalendarView } from '@/components/calendar-view'
 import { sql } from '@/lib/db'
 import { getSession } from '@/lib/auth'
+import type { MatchCountsSummary } from '@/lib/match-summary'
 
-interface MatchSummary {
-  id: number
-  title: string | null
-  date_time: string
-  location_type: string
-  location_custom: string | null
-  participant_count: number
-}
-
-async function getMatchesForCalendarMonth(year: number, month: number): Promise<MatchSummary[]> {
+async function getMatchesForCalendarMonth(year: number, month: number): Promise<MatchCountsSummary[]> {
   // Initial render for current month; other months are fetched client-side.
   // On the server, avoid calling our own API route via HTTP (which can break in prod if it
   // accidentally points at localhost). Query the DB directly.
@@ -33,7 +25,12 @@ async function getMatchesForCalendarMonth(year: number, month: number): Promise<
       m.date_time,
       m.location_type,
       m.location_custom,
-      COUNT(mp_all.id)::int as participant_count
+      COUNT(mp_all.id) FILTER (
+        WHERE (CASE WHEN mp_all.role = 'EXTRA' THEN 'SUBSTITUTE' ELSE mp_all.role::text END) = 'PLAYER'
+      )::int as player_count,
+      COUNT(mp_all.id) FILTER (
+        WHERE (CASE WHEN mp_all.role = 'EXTRA' THEN 'SUBSTITUTE' ELSE mp_all.role::text END) = 'SUBSTITUTE'
+      )::int as substitute_count
     FROM matches m
     LEFT JOIN match_participants mp_all ON m.id = mp_all.match_id
     WHERE
@@ -50,7 +47,7 @@ async function getMatchesForCalendarMonth(year: number, month: number): Promise<
     ORDER BY m.date_time ASC
   `
 
-  return matches as MatchSummary[]
+  return matches as MatchCountsSummary[]
 }
 
 export default async function CalendarioPage() {

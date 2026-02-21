@@ -12,7 +12,8 @@ interface Match {
   location_custom: string | null
   created_by_user_id: number
   creator_name: string
-  participant_count: number
+  player_count: number
+  substitute_count: number
   is_registered?: boolean
 }
 
@@ -94,7 +95,9 @@ export function MatchCard({
 
             <div className="flex items-center gap-2 text-sm text-muted-foreground mt-1">
               <Users className="w-4 h-4" />
-              <span>{match.participant_count} anotados</span>
+              <span>
+                Participantes {match.player_count} · Suplentes {match.substitute_count}
+              </span>
               <span className="text-xs">- Organiza {match.creator_name}</span>
             </div>
           </div>
