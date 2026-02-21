@@ -133,7 +133,7 @@ export function InvitePlayersDialog({
             </div>
           ) : filteredUsers.length === 0 ? (
             <p className="text-muted-foreground text-sm text-center py-8">
-              {search ? 'No se encontraron jugadores' : 'Todos los jugadores ya estan anotados'}
+              {search ? 'No se encontraron jugadores' : 'Todos los jugadores ya están en el partido'}
             </p>
           ) : (
             <div className="flex flex-col gap-2 py-2">
