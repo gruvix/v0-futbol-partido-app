@@ -88,7 +88,7 @@ export default async function DashboardPage() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-foreground">Hola, {session?.name}</h1>
-          <p className="text-muted-foreground">Proximos partidos y actividad</p>
+          <p className="text-gray-700">Próximos partidos y actividad</p>
         </div>
       </div>
 
@@ -157,7 +157,7 @@ export default async function DashboardPage() {
             {otherPublicMatches.length > 0 && (
               <div className="flex flex-col gap-3">
                 <h2 className="text-lg font-semibold text-muted-foreground">Otros partidos</h2>
-                <div className="grid gap-3 opacity-90">
+                <div className="grid gap-3">
                   {otherPublicMatches.map((match) => (
                     <MatchCard
                       key={match.id}
@@ -173,7 +173,7 @@ export default async function DashboardPage() {
             {pastWeekMatches.length > 0 && (
               <div className="flex flex-col gap-3">
                 <h2 className="text-lg font-semibold text-muted-foreground">Partidos anteriores (últimos 7 días)</h2>
-                <div className="grid gap-3 opacity-90">
+                <div className="grid gap-3">
                   {pastWeekMatches.map((match) => (
                     <MatchCard
                       key={match.id}

@@ -42,8 +42,11 @@ export default function RootLayout({
       <body
         className="font-sans antialiased app-bg"
       >
+        <div className='bg-white/20'>
+
         <ErrorToastProvider>{children}</ErrorToastProvider>
         <Analytics />
+        </div>
       </body>
     </html>
   );

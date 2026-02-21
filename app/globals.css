@@ -148,7 +148,7 @@
   min-height: 100dvh;
 }
 
-@media (min-width: 1024px) {
+@media (min-width: 724px) {
   .app-bg {
     background-image: url("/bg-large.webp");
   }
