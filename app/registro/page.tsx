@@ -41,7 +41,7 @@ export default function RegistroPage() {
   }
 
   return (
-    <main className="min-h-screen flex items-center justify-center bg-background p-4">
+    <main className="min-h-screen flex items-center justify-center bg-white/40 p-4">
       {loading && !success && <LoadingOverlay message="Creando cuenta..." />}
       <Card className="w-full max-w-md">
         <CardHeader className="text-center">

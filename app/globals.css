@@ -130,6 +130,30 @@
   }
 }
 
+/*
+  App background image
+  - Default: small screens use /public/bg-small.webp
+  - Large screens: swap to /public/bg-large.webp
+  - Fallback: theme background color (and ultimately white)
+
+  Note: avoid inline styles for background-image because they override responsive CSS.
+*/
+.app-bg {
+  background-color: var(--background, #ffffff);
+  background-image: url("/bg-small.webp");
+  background-size: cover;
+  background-repeat: no-repeat;
+  background-position: center;
+  /* Prevents some mobile browsers from stretching background during scroll */
+  min-height: 100dvh;
+}
+
+@media (min-width: 1024px) {
+  .app-bg {
+    background-image: url("/bg-large.webp");
+  }
+}
+
 /* Football bouncing ball animation - based on https://codepen.io/eyalcohen4/pen/mprbzP */
 @keyframes football-bounce {
   0%, 100% {
