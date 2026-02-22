@@ -12,15 +12,9 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
+import type { MatchCountsSummary } from '@/lib/match-summary'
 
-interface MatchSummary {
-  id: number
-  title: string | null
-  date_time: string
-  location_type: string
-  location_custom: string | null
-  participant_count: number
-}
+type MatchSummary = MatchCountsSummary
 
 interface CalendarViewProps {
   initialMatches: MatchSummary[]

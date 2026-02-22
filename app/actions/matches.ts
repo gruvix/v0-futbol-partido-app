@@ -132,8 +132,8 @@ export async function createMatch(formData: FormData) {
   const invitesPerPlayer = invitesPerPlayerStr ? parseInt(invitesPerPlayerStr) : null
 
   // Get creator's name for default title
-  const user = await sql`SELECT name FROM users WHERE id = ${session.userId}`
-  const creatorName = user[0]?.name || 'Usuario'
+  const user = await sql`SELECT trim(initcap(name) || ' ' || initcap(last_name)) as full_name FROM users WHERE id = ${session.userId}`
+  const creatorName = (user[0]?.full_name as string | undefined) || 'Usuario'
   const title = titleInput?.trim() ? titleInput : `Partido de ${creatorName}`
 
   if (!dateStr || !time || !locationType) {
@@ -618,7 +618,7 @@ export async function getAllUsers() {
 
   try {
     const users = await sql`
-      SELECT id, name, phone_last_four, gender
+      SELECT id, trim(initcap(name) || ' ' || initcap(last_name)) as name, phone_last_four, gender
       FROM users 
       WHERE is_approved = true
       ORDER BY name ASC
@@ -944,7 +944,7 @@ export async function removeMatchAdmin(matchId: number, userId: number) {
 export async function getMatchAdmins(matchId: number) {
   try {
     const admins = await sql`
-      SELECT ma.user_id, u.name, u.phone_last_four
+      SELECT ma.user_id, trim(initcap(u.name) || ' ' || initcap(u.last_name)) as name, u.phone_last_four
       FROM match_admins ma
       JOIN users u ON ma.user_id = u.id
       WHERE ma.match_id = ${matchId}

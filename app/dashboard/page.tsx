@@ -5,18 +5,22 @@ import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import Link from 'next/link'
 import { Plus, Calendar } from 'lucide-react'
+import type { MatchCountsSummary } from '@/lib/match-summary'
 
-interface Match {
-  id: number
-  title: string | null
-  date_time: string
-  location_type: string
-  location_custom: string | null
+type Match = MatchCountsSummary & {
   created_by_user_id: number
   creator_name: string
-  participant_count: number
   is_public: boolean
   is_registered: boolean
+}
+
+function displayName(name: string): string {
+  if (!name) return name
+  return name
+    .split(' ')
+    .filter(Boolean)
+    .map((p) => p.charAt(0).toUpperCase() + p.slice(1).toLowerCase())
+    .join(' ')
 }
 
 async function getDashboardMatches(userId: number): Promise<Match[]> {
@@ -32,8 +36,13 @@ async function getDashboardMatches(userId: number): Promise<Match[]> {
       m.location_custom,
       m.created_by_user_id,
       m.is_public,
-      u.name as creator_name,
-      COUNT(mp_all.id)::int as participant_count,
+      trim(initcap(u.name) || ' ' || initcap(u.last_name)) as creator_name,
+      COUNT(mp_all.id) FILTER (
+        WHERE (CASE WHEN mp_all.role = 'EXTRA' THEN 'SUBSTITUTE' ELSE mp_all.role::text END) = 'PLAYER'
+      )::int as player_count,
+      COUNT(mp_all.id) FILTER (
+        WHERE (CASE WHEN mp_all.role = 'EXTRA' THEN 'SUBSTITUTE' ELSE mp_all.role::text END) = 'SUBSTITUTE'
+      )::int as substitute_count,
       EXISTS (
         SELECT 1
         FROM match_participants mp_me
@@ -52,7 +61,7 @@ async function getDashboardMatches(userId: number): Promise<Match[]> {
           WHERE mp_me.match_id = m.id AND mp_me.user_id = ${userId}
         )
       )
-    GROUP BY m.id, u.name
+    GROUP BY m.id, u.name, u.last_name
     ORDER BY m.date_time ASC
     LIMIT 20
   `
@@ -87,8 +96,8 @@ export default async function DashboardPage() {
     <div className="flex flex-col gap-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-foreground">Hola, {session?.name}</h1>
-          <p className="text-muted-foreground">Proximos partidos y actividad</p>
+          <h1 className="text-2xl font-bold text-foreground">Hola, {displayName(`${session?.name ?? ''} ${session?.lastName ?? ''}`.trim())}</h1>
+          <p className="text-gray-700">Próximos partidos y actividad</p>
         </div>
       </div>
 
@@ -157,7 +166,7 @@ export default async function DashboardPage() {
             {otherPublicMatches.length > 0 && (
               <div className="flex flex-col gap-3">
                 <h2 className="text-lg font-semibold text-muted-foreground">Otros partidos</h2>
-                <div className="grid gap-3 opacity-90">
+                <div className="grid gap-3">
                   {otherPublicMatches.map((match) => (
                     <MatchCard
                       key={match.id}
@@ -173,7 +182,7 @@ export default async function DashboardPage() {
             {pastWeekMatches.length > 0 && (
               <div className="flex flex-col gap-3">
                 <h2 className="text-lg font-semibold text-muted-foreground">Partidos anteriores (últimos 7 días)</h2>
-                <div className="grid gap-3 opacity-90">
+                <div className="grid gap-3">
                   {pastWeekMatches.map((match) => (
                     <MatchCard
                       key={match.id}

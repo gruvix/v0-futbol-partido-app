@@ -13,7 +13,7 @@ async function getPlayers(): Promise<Player[]> {
   const players = await sql`
     SELECT 
       u.id,
-      u.name,
+      trim(initcap(u.name) || ' ' || initcap(u.last_name)) as name,
       u.phone_last_four,
       u.gender,
       COUNT(mp.id)::int as matches_played

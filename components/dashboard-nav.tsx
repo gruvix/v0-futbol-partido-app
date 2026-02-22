@@ -52,7 +52,7 @@ export function DashboardNav({ userName, isAdmin }: DashboardNavProps) {
                     size="sm"
                     className={cn(
                       'gap-2',
-                      isActive && 'bg-secondary text-secondary-foreground'
+                      isActive && 'bg-green-300 text-secondary-foreground'
                     )}
                   >
                     <Icon className="w-4 h-4" />
@@ -98,7 +98,7 @@ export function DashboardNav({ userName, isAdmin }: DashboardNavProps) {
                   size="sm"
                   className={cn(
                     'gap-2 text-xs',
-                    isActive && 'bg-secondary text-secondary-foreground'
+                    isActive && 'bg-green-300 text-secondary-foreground'
                   )}
                 >
                   <Icon className="w-3 h-3" />

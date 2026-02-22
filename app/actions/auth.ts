@@ -15,11 +15,12 @@ function parseGender(input: FormDataEntryValue | null): 'MALE' | 'FEMALE' | 'OTH
 
 export async function register(formData: FormData) {
   const name = formData.get('name') as string
+  const lastName = formData.get('lastName') as string
   const phoneLast4 = formData.get('phoneLast4') as string
   const password = formData.get('password') as string
   const gender = parseGender(formData.get('gender'))
 
-  if (!name || !phoneLast4 || !password) {
+  if (!name || !lastName || !phoneLast4 || !password) {
     return { error: 'Todos los campos son requeridos' }
   }
 
@@ -32,7 +33,7 @@ export async function register(formData: FormData) {
   }
 
   try {
-    const result = await registerUser(name.trim(), phoneLast4, password, gender)
+    const result = await registerUser(name.trim(), lastName.trim(), phoneLast4, password, gender)
     
     if (result.pending) {
       return { success: true, pending: true, message: 'Solicitud enviada. Un administrador debe aprobar tu cuenta.' }

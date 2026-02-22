@@ -59,6 +59,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
+import { getParticipantCountsFromRoster } from '@/lib/match-summary'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -272,6 +273,8 @@ export function MatchDetailClient({
 
   const players = effectiveParticipants.filter(p => p.role === 'PLAYER')
   const substitutes = effectiveParticipants.filter(p => p.role === 'SUBSTITUTE')
+
+  const { playerCount, substituteCount } = getParticipantCountsFromRoster(effectiveParticipants)
 
   const isSubscribed = Boolean(userParticipation)
   const activePlayersForPayments = players
@@ -1421,7 +1424,7 @@ export function MatchDetailClient({
             <div className="flex items-center justify-between flex-wrap gap-2">
               <h3 className="font-semibold text-foreground flex items-center gap-2">
                 <Users className="w-5 h-5" />
-                Anotados ({participants.length})
+                Participantes ({playerCount}) · Suplentes ({substituteCount})
               </h3>
               <div className="flex items-center gap-2">
                 {!isPast && (

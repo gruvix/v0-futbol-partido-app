@@ -28,9 +28,12 @@ export default async function DashboardLayout({
   return (
     <ActionLoaderWrapper>
       <ErrorToastProvider>
-        <div className="min-h-screen bg-background">
+        <div className="min-h-screen bg-white/40">
           <RouteLoader />
-          <DashboardNav userName={session.name} isAdmin={Boolean(session.admin)} />
+          <DashboardNav
+            userName={session.lastName ? `${session.name} ${session.lastName}` : session.name}
+            isAdmin={Boolean(session.admin)}
+          />
           <main className="container mx-auto px-4 py-6 max-w-4xl">
             {children}
           </main>
