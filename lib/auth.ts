@@ -9,6 +9,21 @@ const REQUIRE_APPROVAL = process.env.REQUIRE_APPROVAL === 'true'
 
 export type UserGender = 'MALE' | 'FEMALE' | 'OTHER'
 
+function normalizeUserName(input: string): string {
+  // Registration/login identifier must be case-insensitive and stored lowercase.
+  return input.trim().toLowerCase()
+}
+
+function normalizeNamePart(input: string): string {
+  return input.trim()
+}
+
+function ensureAlphanumericOnly(value: string, fieldLabel: string): void {
+  if (!/^[a-z0-9]+$/i.test(value)) {
+    throw new Error(`${fieldLabel} solo puede contener letras y numeros (sin espacios ni simbolos)`) 
+  }
+}
+
 export async function hashPassword(password: string): Promise<string> {
   return bcrypt.hash(password, 12)
 }
@@ -52,7 +67,7 @@ export async function getSession() {
   if (!token) return null
 
   const sessions = await sql`
-    SELECT s.*, u.id as user_id, u.name, u.phone_last_four, u.is_approved, u.admin, u.gender
+    SELECT s.*, u.id as user_id, u.name, u.last_name, u.phone_last_four, u.is_approved, u.admin, u.gender
     FROM sessions s
     JOIN users u ON s.user_id = u.id
     WHERE s.token = ${token} AND s.expires_at > NOW()
@@ -63,6 +78,7 @@ export async function getSession() {
   return {
     userId: sessions[0].user_id,
     name: sessions[0].name,
+    lastName: sessions[0].last_name,
     phoneLast4: sessions[0].phone_last_four,
     isApproved: sessions[0].is_approved,
     admin: sessions[0].admin,
@@ -82,15 +98,29 @@ export async function destroySession() {
 
 export async function registerUser(
   name: string,
+  lastName: string,
   phoneLast4: string,
   password: string,
   gender: UserGender,
 ) {
+  const normalizedName = normalizeUserName(name)
+  const normalizedLastName = normalizeNamePart(lastName)
+
+  if (!normalizedLastName) {
+    throw new Error('Apellido es requerido')
+  }
+
+  // Rules: no symbols, no spaces, only alphanumeric.
+  ensureAlphanumericOnly(normalizedName, 'Nombre')
+  ensureAlphanumericOnly(normalizedLastName, 'Apellido')
+
   const passwordHash = await hashPassword(password)
 
   // Check if user already exists
   const existingUsers = await sql`
-    SELECT id FROM users WHERE name = ${name} AND phone_last_four = ${phoneLast4}
+    SELECT id
+    FROM users
+    WHERE lower(name) = ${normalizedName} AND phone_last_four = ${phoneLast4}
   `
   
   if (existingUsers.length > 0) {
@@ -100,7 +130,9 @@ export async function registerUser(
   if (REQUIRE_APPROVAL) {
     // Check if pending request exists
     const existingPending = await sql`
-      SELECT id FROM pending_users WHERE name = ${name} AND phone_last_four = ${phoneLast4}
+      SELECT id
+      FROM pending_users
+      WHERE lower(name) = ${normalizedName} AND phone_last_four = ${phoneLast4}
     `
     
     if (existingPending.length > 0) {
@@ -109,16 +141,16 @@ export async function registerUser(
 
     // Create pending user
     await sql`
-      INSERT INTO pending_users (name, phone_last_four, password_hash, gender)
-      VALUES (${name}, ${phoneLast4}, ${passwordHash}, ${gender})
+      INSERT INTO pending_users (name, last_name, phone_last_four, password_hash, gender)
+      VALUES (${normalizedName}, ${normalizedLastName}, ${phoneLast4}, ${passwordHash}, ${gender})
     `
 
     return { pending: true }
   } else {
     // Create user directly (no approval needed)
     const result = await sql`
-      INSERT INTO users (name, phone_last_four, password_hash, gender, is_approved)
-      VALUES (${name}, ${phoneLast4}, ${passwordHash}, ${gender}, true)
+      INSERT INTO users (name, last_name, phone_last_four, password_hash, gender, is_approved)
+      VALUES (${normalizedName}, ${normalizedLastName}, ${phoneLast4}, ${passwordHash}, ${gender}, true)
       RETURNING id
     `
     
@@ -130,16 +162,20 @@ export async function registerUser(
 }
 
 export async function loginUser(name: string, phoneLast4: string, password: string) {
+  const normalizedName = normalizeUserName(name)
+
   const users = await sql`
     SELECT id, password_hash, is_approved FROM users 
-    WHERE name = ${name} AND phone_last_four = ${phoneLast4}
+    WHERE lower(name) = ${normalizedName} AND phone_last_four = ${phoneLast4}
   `
 
   if (users.length === 0) {
     if (REQUIRE_APPROVAL) {
       // Check if pending
       const pending = await sql`
-        SELECT id FROM pending_users WHERE name = ${name} AND phone_last_four = ${phoneLast4}
+        SELECT id
+        FROM pending_users
+        WHERE lower(name) = ${normalizedName} AND phone_last_four = ${phoneLast4}
       `
       if (pending.length > 0) {
         throw new Error('Tu cuenta esta pendiente de aprobacion')

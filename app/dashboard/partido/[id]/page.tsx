@@ -55,7 +55,7 @@ async function getMatch(id: number): Promise<Match | null> {
       m.max_players,
       m.invites_per_player,
       m.field_rent_total,
-      u.name as creator_name
+      trim(initcap(u.name) || ' ' || initcap(u.last_name)) as creator_name
     FROM matches m
     JOIN users u ON m.created_by_user_id = u.id
     WHERE m.id = ${id}
@@ -69,7 +69,7 @@ async function getParticipants(matchId: number, includePayments: boolean): Promi
       SELECT 
         mp.id,
         mp.user_id,
-        u.name,
+        trim(initcap(u.name) || ' ' || initcap(u.last_name)) as name,
         u.phone_last_four,
         u.gender,
         CASE WHEN mp.role = 'EXTRA' THEN 'SUBSTITUTE' ELSE mp.role::text END AS role,
@@ -95,7 +95,7 @@ async function getParticipants(matchId: number, includePayments: boolean): Promi
     SELECT 
       mp.id,
       mp.user_id,
-      u.name,
+      trim(initcap(u.name) || ' ' || initcap(u.last_name)) as name,
       u.phone_last_four,
       u.gender,
       mp.role,
@@ -128,7 +128,7 @@ async function isUserSubscribed(matchId: number, userId: number): Promise<boolea
 
 async function getMatchAdmins(matchId: number): Promise<Admin[]> {
   const admins = await sql`
-    SELECT ma.user_id, u.name, u.phone_last_four
+    SELECT ma.user_id, trim(initcap(u.name) || ' ' || initcap(u.last_name)) as name, u.phone_last_four
     FROM match_admins ma
     JOIN users u ON ma.user_id = u.id
     WHERE ma.match_id = ${matchId}

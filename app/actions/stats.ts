@@ -15,7 +15,7 @@ export async function getUsersWithStats(): Promise<{ error?: string; users: Stat
   const users = await sql`
     SELECT
       u.id,
-      u.name,
+      trim(initcap(u.name) || ' ' || initcap(u.last_name)) as name,
       u.phone_last_four,
       COALESCE(s.pac, 5)::int AS pac,
       COALESCE(s.sho, 5)::int AS sho,

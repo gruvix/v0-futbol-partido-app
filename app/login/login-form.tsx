@@ -65,6 +65,9 @@ export function LoginForm(): React.JSX.Element {
     setLoading(true)
 
     const formData = new FormData(e.currentTarget)
+    // Username is case-insensitive: always normalize to lowercase before sending.
+    const rawName = (formData.get('name') as string | null) ?? ''
+    formData.set('name', rawName.trim().toLowerCase())
     const result = await login(formData)
 
     if (result?.error) {

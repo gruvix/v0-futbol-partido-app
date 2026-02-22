@@ -18,12 +18,24 @@ export default function RegistroPage() {
   const router = useRouter()
   const { showError } = useErrorToast()
 
+  function setAlnumCustomValidity(input: HTMLInputElement): void {
+    if (!input.value) {
+      input.setCustomValidity('')
+      return
+    }
+    // Only letters and numbers, no spaces, no symbols.
+    input.setCustomValidity(/^[a-z0-9]+$/i.test(input.value) ? '' : 'Solo letras y numeros (sin espacios ni simbolos)')
+  }
+
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault()
     setSuccess('')
     setLoading(true)
 
     const formData = new FormData(e.currentTarget)
+    // Username is case-insensitive: always normalize to lowercase before sending.
+    const rawName = (formData.get('name') as string | null) ?? ''
+    formData.set('name', rawName.trim().toLowerCase())
     const result = await register(formData)
 
     if (result?.error) {
@@ -74,6 +86,33 @@ export default function RegistroPage() {
                   required
                   autoComplete="name"
                   disabled={loading}
+                  pattern="[A-Za-z0-9]+"
+                  onInvalid={(e) => {
+                    setAlnumCustomValidity(e.currentTarget)
+                  }}
+                  onInput={(e) => {
+                    setAlnumCustomValidity(e.currentTarget)
+                  }}
+                />
+              </div>
+
+              <div className="flex flex-col gap-2">
+                <Label htmlFor="lastName">Apellido</Label>
+                <Input
+                  id="lastName"
+                  name="lastName"
+                  type="text"
+                  placeholder="Tu apellido"
+                  required
+                  autoComplete="family-name"
+                  disabled={loading}
+                  pattern="[A-Za-z0-9]+"
+                  onInvalid={(e) => {
+                    setAlnumCustomValidity(e.currentTarget)
+                  }}
+                  onInput={(e) => {
+                    setAlnumCustomValidity(e.currentTarget)
+                  }}
                 />
               </div>
 

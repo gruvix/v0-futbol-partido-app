@@ -44,6 +44,7 @@ export async function initializeDatabase() {
     CREATE TABLE IF NOT EXISTS users (
       id SERIAL PRIMARY KEY,
       name VARCHAR(255) NOT NULL,
+      last_name VARCHAR(255) NOT NULL DEFAULT '',
       phone_last_four VARCHAR(4) NOT NULL,
       password_hash VARCHAR(255) NOT NULL,
       admin BOOLEAN DEFAULT false,
@@ -59,6 +60,7 @@ export async function initializeDatabase() {
     CREATE TABLE IF NOT EXISTS pending_users (
       id SERIAL PRIMARY KEY,
       name VARCHAR(255) NOT NULL,
+      last_name VARCHAR(255) NOT NULL DEFAULT '',
       phone_last_four VARCHAR(4) NOT NULL,
       password_hash VARCHAR(255) NOT NULL,
       gender user_gender NOT NULL DEFAULT 'MALE',
@@ -125,6 +127,10 @@ export async function initializeDatabase() {
   try {
     await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS gender user_gender NOT NULL DEFAULT 'MALE'`
     await sql`ALTER TABLE pending_users ADD COLUMN IF NOT EXISTS gender user_gender NOT NULL DEFAULT 'MALE'`
+
+    // Registration fields
+    await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS last_name VARCHAR(255) NOT NULL DEFAULT ''`
+    await sql`ALTER TABLE pending_users ADD COLUMN IF NOT EXISTS last_name VARCHAR(255) NOT NULL DEFAULT ''`
 
     await sql`ALTER TABLE matches ADD COLUMN IF NOT EXISTS title VARCHAR(100)`
     await sql`ALTER TABLE matches ADD COLUMN IF NOT EXISTS emoji VARCHAR(10)`

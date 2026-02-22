@@ -14,6 +14,15 @@ type Match = MatchCountsSummary & {
   is_registered: boolean
 }
 
+function displayName(name: string): string {
+  if (!name) return name
+  return name
+    .split(' ')
+    .filter(Boolean)
+    .map((p) => p.charAt(0).toUpperCase() + p.slice(1).toLowerCase())
+    .join(' ')
+}
+
 async function getDashboardMatches(userId: number): Promise<Match[]> {
   // Dashboard should not send past matches (before today). Past matches will live in a future section.
   // Privacy rule: private matches are only visible to registered users.
@@ -27,7 +36,7 @@ async function getDashboardMatches(userId: number): Promise<Match[]> {
       m.location_custom,
       m.created_by_user_id,
       m.is_public,
-      u.name as creator_name,
+      trim(initcap(u.name) || ' ' || initcap(u.last_name)) as creator_name,
       COUNT(mp_all.id) FILTER (
         WHERE (CASE WHEN mp_all.role = 'EXTRA' THEN 'SUBSTITUTE' ELSE mp_all.role::text END) = 'PLAYER'
       )::int as player_count,
@@ -52,7 +61,7 @@ async function getDashboardMatches(userId: number): Promise<Match[]> {
           WHERE mp_me.match_id = m.id AND mp_me.user_id = ${userId}
         )
       )
-    GROUP BY m.id, u.name
+    GROUP BY m.id, u.name, u.last_name
     ORDER BY m.date_time ASC
     LIMIT 20
   `
@@ -87,7 +96,7 @@ export default async function DashboardPage() {
     <div className="flex flex-col gap-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-foreground">Hola, {session?.name}</h1>
+          <h1 className="text-2xl font-bold text-foreground">Hola, {displayName(`${session?.name ?? ''} ${session?.lastName ?? ''}`.trim())}</h1>
           <p className="text-gray-700">Próximos partidos y actividad</p>
         </div>
       </div>
