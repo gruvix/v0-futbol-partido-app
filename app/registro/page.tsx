@@ -4,6 +4,7 @@ import React from "react"
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
+import { Eye, EyeOff } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -15,6 +16,7 @@ import { useErrorToast } from '@/components/error-toast-provider'
 export default function RegistroPage() {
   const [success, setSuccess] = useState('')
   const [loading, setLoading] = useState(false)
+  const [showPassword, setShowPassword] = useState<boolean>(false)
   const router = useRouter()
   const { showError } = useErrorToast()
 
@@ -136,16 +138,32 @@ export default function RegistroPage() {
 
               <div className="flex flex-col gap-2">
                 <Label htmlFor="password">Contraseña</Label>
-                <Input
-                  id="password"
-                  name="password"
-                  type="password"
-                  placeholder="Minimo 8 caracteres"
-                  required
-                  minLength={8}
-                  autoComplete="new-password"
-                  disabled={loading}
-                />
+                <div className="relative">
+                  <Input
+                    id="password"
+                    name="password"
+                    type={showPassword ? 'text' : 'password'}
+                    placeholder="Minimo 8 caracteres"
+                    required
+                    minLength={8}
+                    autoComplete="new-password"
+                    disabled={loading}
+                    className="pr-10"
+                  />
+                  <button
+                    type="button"
+                    className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground disabled:opacity-50"
+                    onClick={() => setShowPassword((prev) => !prev)}
+                    disabled={loading}
+                    aria-label={showPassword ? 'Ocultar contraseña' : 'Mostrar contraseña'}
+                  >
+                    {showPassword ? (
+                      <EyeOff className="h-4 w-4" aria-hidden="true" />
+                    ) : (
+                      <Eye className="h-4 w-4" aria-hidden="true" />
+                    )}
+                  </button>
+                </div>
                 <p className="text-xs text-muted-foreground">
                   Debe tener al menos 8 caracteres
                 </p>

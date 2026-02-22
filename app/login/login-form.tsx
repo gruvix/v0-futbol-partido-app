@@ -12,14 +12,43 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { Eye, EyeOff } from 'lucide-react'
 
-const STORAGE_KEY_NAME = 'fulbito_login_name'
-const STORAGE_KEY_PHONE = 'fulbito_login_phone'
+const STORAGE_KEY_REMEMBER = 'fulbito_login_remember'
+const STORAGE_KEY_CREDENTIALS = 'fulbito_login_credentials_v1'
+
+type RememberedCredentials = {
+  name: string
+  phoneLast4: string
+  password: string
+}
+
+function safeParseCredentials(raw: string | null): RememberedCredentials | null {
+  if (!raw) return null
+  try {
+    const parsed: unknown = JSON.parse(raw)
+    if (!parsed || typeof parsed !== 'object') return null
+
+    const obj = parsed as Record<string, unknown>
+    const name = typeof obj.name === 'string' ? obj.name : ''
+    const phoneLast4 = typeof obj.phoneLast4 === 'string' ? obj.phoneLast4 : ''
+    const password = typeof obj.password === 'string' ? obj.password : ''
+
+    return { name, phoneLast4, password }
+  } catch {
+    return null
+  }
+}
 
 export function LoginForm(): React.JSX.Element {
   const [loading, setLoading] = useState<boolean>(false)
   const [name, setName] = useState<string>('')
   const [phoneLast4, setPhoneLast4] = useState<string>('')
+  const [password, setPassword] = useState<string>('')
+  const [remember, setRemember] = useState<boolean>(false)
+  const [showPassword, setShowPassword] = useState<boolean>(false)
+
+  const previousRememberRef = useRef<boolean>(false)
 
   const router = useRouter()
   const { showError } = useErrorToast()
@@ -30,20 +59,54 @@ export function LoginForm(): React.JSX.Element {
 
   // Load saved values from localStorage on mount
   useEffect(() => {
-    const savedName = localStorage.getItem(STORAGE_KEY_NAME)
-    const savedPhone = localStorage.getItem(STORAGE_KEY_PHONE)
-    if (savedName) setName(savedName)
-    if (savedPhone) setPhoneLast4(savedPhone)
+    const rememberEnabled = localStorage.getItem(STORAGE_KEY_REMEMBER) === '1'
+
+    // Legacy keys (before remember checkbox existed)
+    const legacyName = localStorage.getItem('fulbito_login_name')
+    const legacyPhone = localStorage.getItem('fulbito_login_phone')
+    const hasLegacy = Boolean(legacyName || legacyPhone)
+
+    const savedCredentials = safeParseCredentials(localStorage.getItem(STORAGE_KEY_CREDENTIALS))
+
+    // Only restore password if the user explicitly enabled "remember".
+    if (rememberEnabled) {
+      setRemember(true)
+      if (savedCredentials) {
+        setName(savedCredentials.name)
+        setPhoneLast4(savedCredentials.phoneLast4)
+        setPassword(savedCredentials.password)
+      }
+      return
+    }
+
+    // Backwards compatibility: older versions saved name/phone automatically.
+    // We still prefill them, but we DO NOT enable "remember" automatically.
+    if (hasLegacy) {
+      if (legacyName) setName(legacyName)
+      if (legacyPhone) setPhoneLast4(legacyPhone)
+    }
   }, [])
 
-  // Save values to localStorage when they change
+  // Save values to localStorage when they change (ONLY when remember is enabled)
   useEffect(() => {
-    if (name) localStorage.setItem(STORAGE_KEY_NAME, name)
-  }, [name])
+    if (remember) {
+      localStorage.setItem(STORAGE_KEY_REMEMBER, '1')
+      const credentials: RememberedCredentials = { name, phoneLast4, password }
+      localStorage.setItem(STORAGE_KEY_CREDENTIALS, JSON.stringify(credentials))
 
-  useEffect(() => {
-    if (phoneLast4) localStorage.setItem(STORAGE_KEY_PHONE, phoneLast4)
-  }, [phoneLast4])
+      // Keep legacy keys updated for backwards-compat with older deployments.
+      localStorage.setItem('fulbito_login_name', name)
+      localStorage.setItem('fulbito_login_phone', phoneLast4)
+      previousRememberRef.current = true
+    } else if (previousRememberRef.current) {
+      localStorage.removeItem(STORAGE_KEY_REMEMBER)
+      localStorage.removeItem(STORAGE_KEY_CREDENTIALS)
+      localStorage.removeItem('fulbito_login_name')
+      localStorage.removeItem('fulbito_login_phone')
+
+      previousRememberRef.current = false
+    }
+  }, [remember, name, phoneLast4, password])
 
   // Keyboard navigation: Enter moves focus to next field
   function handleNameKeyDown(e: React.KeyboardEvent<HTMLInputElement>): void {
@@ -142,17 +205,46 @@ export function LoginForm(): React.JSX.Element {
 
             <div className="flex flex-col gap-2">
               <Label htmlFor="password">Contraseña</Label>
-              <Input
-                ref={passwordInputRef}
-                id="password"
-                name="password"
-                type="password"
-                placeholder="Tu contraseña"
-                required
-                autoComplete="current-password"
-                disabled={loading}
-              />
+              <div className="relative">
+                <Input
+                  ref={passwordInputRef}
+                  id="password"
+                  name="password"
+                  type={showPassword ? 'text' : 'password'}
+                  placeholder="Tu contraseña"
+                  required
+                  autoComplete="current-password"
+                  disabled={loading}
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  className="pr-10"
+                />
+                <button
+                  type="button"
+                  className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground disabled:opacity-50"
+                  onClick={() => setShowPassword((prev) => !prev)}
+                  disabled={loading}
+                  aria-label={showPassword ? 'Ocultar contraseña' : 'Mostrar contraseña'}
+                >
+                  {showPassword ? (
+                    <EyeOff className="h-4 w-4" aria-hidden="true" />
+                  ) : (
+                    <Eye className="h-4 w-4" aria-hidden="true" />
+                  )}
+                </button>
+              </div>
             </div>
+
+            <label className="flex items-center gap-2 text-sm text-muted-foreground select-none">
+              <input
+                type="checkbox"
+                checked={remember}
+                onChange={(e) => setRemember(e.target.checked)}
+                disabled={loading}
+                className="h-4 w-4 accent-primary"
+              />
+              Recordar credenciales
+            </label>
 
             {/* errors are shown via ErrorToastProvider */}
 
