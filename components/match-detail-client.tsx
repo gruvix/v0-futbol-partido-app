@@ -1803,7 +1803,15 @@ export function MatchDetailClient({
                     <GenderIcon gender={selectedParticipant.gender} className="w-4 h-4 shrink-0" />
                   ) : null}
                   <span>{selectedParticipant?.name ?? ''}</span>
+                <span className="inline-flex items-center gap-1">
+                  {selectedParticipant?.phone_last_four ? (
+                    <span className="text-sm font-medium text-muted-foreground">
+                      ({selectedParticipant.phone_last_four.replace(/\D/g, '')})
+                    </span>
+                  ) : null}
                 </span>
+                </span>
+
               </DialogTitle>
               <button
                 type="button"
