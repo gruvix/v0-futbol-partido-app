@@ -5,7 +5,7 @@ import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { logout } from '@/app/actions/auth'
-import { Calendar, Users, Plus, LogOut, Home, BarChart3 } from 'lucide-react'
+import { Calendar, Users, Plus, LogOut, Home, BarChart3, Settings } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { LoadingOverlay } from '@/components/football-loader'
 
@@ -22,6 +22,7 @@ export function DashboardNav({ userName, isAdmin }: DashboardNavProps) {
     { href: '/dashboard', label: 'Partidos', icon: Home },
     { href: '/dashboard/calendario', label: 'Calendario', icon: Calendar },
     { href: '/dashboard/jugadores', label: 'Jugadores', icon: Users },
+    { href: '/dashboard/configuracion', label: 'Config', icon: Settings },
     ...(isAdmin ? [{ href: '/dashboard/stats', label: 'Stats', icon: BarChart3 }] : []),
   ]
 
