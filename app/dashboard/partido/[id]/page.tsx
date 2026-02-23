@@ -22,13 +22,16 @@ interface Match {
 
 interface Participant {
   id: number
-  user_id: number
+  user_id: number | null
   name: string
   phone_last_four: string
   role: 'PLAYER' | 'SUBSTITUTE'
   gender: 'MALE' | 'FEMALE' | 'OTHER'
   team: 'A' | 'B' | null
   team_number: number | null
+  is_guest: boolean
+  invited_by_user_id: number | null
+  invited_by_name: string | null
   has_paid?: boolean | null
   payment_notes?: string | null
 }
@@ -69,16 +72,20 @@ async function getParticipants(matchId: number, includePayments: boolean): Promi
       SELECT 
         mp.id,
         mp.user_id,
-        trim(initcap(u.name) || ' ' || initcap(u.last_name)) as name,
-        u.phone_last_four,
-        u.gender,
+        COALESCE(trim(initcap(u.name) || ' ' || initcap(u.last_name)), mp.guest_name) as name,
+        COALESCE(u.phone_last_four, mp.guest_phone_last_four, '') as phone_last_four,
+        COALESCE(u.gender, mp.guest_gender, 'MALE') as gender,
         CASE WHEN mp.role = 'EXTRA' THEN 'SUBSTITUTE' ELSE mp.role::text END AS role,
         mp.team,
         mp.team_number,
+        (mp.user_id IS NULL) as is_guest,
+        mp.invited_by_user_id,
+        trim(initcap(inviter.name) || ' ' || initcap(inviter.last_name)) as invited_by_name,
         mp.has_paid,
         mp.payment_notes
       FROM match_participants mp
-      JOIN users u ON mp.user_id = u.id
+      LEFT JOIN users u ON mp.user_id = u.id
+      LEFT JOIN users inviter ON mp.invited_by_user_id = inviter.id
       WHERE mp.match_id = ${matchId}
       ORDER BY 
         CASE (CASE WHEN mp.role = 'EXTRA' THEN 'SUBSTITUTE' ELSE mp.role::text END)
@@ -95,16 +102,20 @@ async function getParticipants(matchId: number, includePayments: boolean): Promi
     SELECT 
       mp.id,
       mp.user_id,
-      trim(initcap(u.name) || ' ' || initcap(u.last_name)) as name,
-      u.phone_last_four,
-      u.gender,
+      COALESCE(trim(initcap(u.name) || ' ' || initcap(u.last_name)), mp.guest_name) as name,
+      COALESCE(u.phone_last_four, mp.guest_phone_last_four, '') as phone_last_four,
+      COALESCE(u.gender, mp.guest_gender, 'MALE') as gender,
       mp.role,
       mp.team,
       mp.team_number,
+      (mp.user_id IS NULL) as is_guest,
+      mp.invited_by_user_id,
+      trim(initcap(inviter.name) || ' ' || initcap(inviter.last_name)) as invited_by_name,
       NULL::boolean AS has_paid,
       NULL::text AS payment_notes
     FROM match_participants mp
-    JOIN users u ON mp.user_id = u.id
+    LEFT JOIN users u ON mp.user_id = u.id
+    LEFT JOIN users inviter ON mp.invited_by_user_id = inviter.id
     WHERE mp.match_id = ${matchId}
     ORDER BY 
       CASE (CASE WHEN mp.role = 'EXTRA' THEN 'SUBSTITUTE' ELSE mp.role::text END)
