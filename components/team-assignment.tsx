@@ -21,13 +21,15 @@ import { GenderIcon, type Gender } from '@/lib/gender'
 
 interface Participant {
   id: number
-  user_id: number
+  user_id: number | null
   name: string
   phone_last_four: string
   gender: Gender
   role: 'PLAYER' | 'SUBSTITUTE'
   team: 'A' | 'B' | null
   team_number?: number | null
+  is_guest?: boolean
+  invited_by_name?: string | null
 }
 
 interface Admin {
@@ -207,9 +209,9 @@ export function TeamAssignment({
     teamIndex: number | null
     isSub?: boolean
   }) {
-    const isPlayerAdmin = isParticipantAdmin(participant.user_id)
+    const isPlayerAdmin = participant.user_id !== null ? isParticipantAdmin(participant.user_id) : false
     const isLoading = loadingParticipantIds.has(participant.id)
-    const isCreator = participant.user_id === matchCreatorId
+    const isCreator = participant.user_id !== null && participant.user_id === matchCreatorId
     const colors = teamIndex !== null ? TEAM_COLORS[teamIndex % TEAM_COLORS.length] : null
     const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
       id: participant.id,
@@ -247,10 +249,20 @@ export function TeamAssignment({
             <span className="inline-flex items-center gap-1">
               <GenderIcon gender={participant.gender} className="w-3.5 h-3.5 shrink-0" />
               <span className="truncate">{participant.name}</span>
+              {participant.is_guest ? (
+                <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-muted text-muted-foreground shrink-0">
+                  Invitado
+                </span>
+              ) : null}
             </span>
+            {participant.is_guest && participant.invited_by_name ? (
+              <span className="block text-[10px] text-muted-foreground truncate">
+                por {participant.invited_by_name}
+              </span>
+            ) : null}
           </span>
           <span className="text-muted-foreground text-[10px] md:text-[10px] flex items-center gap-1">
-            ({participant.phone_last_four})
+            ({participant.phone_last_four ? participant.phone_last_four : '—'})
             {isCreator ? (
               <Shield className="w-3 h-3 text-amber-400 shrink-0" />
             ) : isPlayerAdmin ? (

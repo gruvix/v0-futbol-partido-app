@@ -91,13 +91,16 @@ interface Match {
 
 interface Participant {
   id: number
-  user_id: number
+  user_id: number | null
   name: string
   phone_last_four: string
   role: 'PLAYER' | 'SUBSTITUTE'
   gender: Gender
   team: 'A' | 'B' | null
   team_number: number | null
+  is_guest?: boolean
+  invited_by_user_id?: number | null
+  invited_by_name?: string | null
   // When the viewer is not subscribed to the match, the server does not
   // include payment info to avoid leaking it.
   has_paid?: boolean | null
@@ -721,8 +724,12 @@ export function MatchDetailClient({
     } else {
       setEditTeamNumber(null)
     }
-    const isCurrentlyAdmin = admins.some(admin => admin.user_id === participant.user_id)
-    const isAdminValue = isCurrentlyAdmin || participant.user_id === match.created_by_user_id
+    const isCurrentlyAdmin = participant.user_id !== null
+      ? admins.some(admin => admin.user_id === participant.user_id)
+      : false
+    const isAdminValue = participant.user_id !== null
+      ? (isCurrentlyAdmin || participant.user_id === match.created_by_user_id)
+      : false
     setEditIsAdmin(isAdminValue)
 
     setInitialEditState({
@@ -861,7 +868,8 @@ export function MatchDetailClient({
       }
     }
 
-    if (!isCreatorUser) {
+    // Only registered users can be promoted to match admins.
+    if (!isCreatorUser && userId !== null) {
       const isCurrentlyAdmin = admins.some(admin => admin.user_id === userId)
       if (editIsAdmin !== isCurrentlyAdmin) {
         const adminResult = editIsAdmin
@@ -1685,7 +1693,7 @@ export function MatchDetailClient({
         open={showInviteDialog}
         onOpenChange={setShowInviteDialog}
         matchId={match.id}
-        currentParticipantIds={participants.map(p => p.user_id)}
+        currentParticipantIds={participants.flatMap(p => (p.user_id === null ? [] : [p.user_id]))}
         invitesPerPlayer={match.invites_per_player}
         currentUserId={currentUserId}
       />
@@ -1903,7 +1911,11 @@ export function MatchDetailClient({
 
           <DialogFooter>
             <div className="flex flex-col gap-2 sm:flex-row sm:justify-end">
-              {isAdmin && selectedParticipant?.user_id !== match.created_by_user_id ? (
+              {(isAdmin && selectedParticipant?.user_id !== match.created_by_user_id) || (
+                !isPast &&
+                Boolean(selectedParticipant?.is_guest) &&
+                selectedParticipant?.invited_by_user_id === currentUserId
+              ) ? (
                 <Button
                   type="button"
                   variant="destructive"

@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react'
 import { Check, Search, UserPlus } from 'lucide-react'
 
-import { getAllUsers, getInviteCount, invitePlayer } from '@/app/actions/matches'
+import { getAllUsers, getInviteCount, inviteGuest, invitePlayer, type InviteGuestInput } from '@/app/actions/matches'
 import { GenderIcon, type Gender } from '@/lib/gender'
 import { useErrorToast } from '@/components/error-toast-provider'
 import { InlineLoader, useActionLoader } from '@/components/football-loader'
@@ -51,6 +51,13 @@ export function InvitePlayersDialog({
   const [search, setSearch] = useState('')
   const [myInviteCount, setMyInviteCount] = useState(0)
 
+  // Guest invite form
+  const [guestName, setGuestName] = useState('')
+  const [guestLastFour, setGuestLastFour] = useState('')
+  const [guestGender, setGuestGender] = useState<InviteGuestInput['gender']>('MALE')
+  const [guestRole, setGuestRole] = useState<InviteGuestInput['role']>('PLAYER')
+  const [guestSubmitting, setGuestSubmitting] = useState(false)
+
   const hasLimit = invitesPerPlayer !== null && invitesPerPlayer !== undefined
   const remainingInvites = hasLimit ? invitesPerPlayer - (myInviteCount + invitedIds.length) : Infinity
   const reachedLimit = hasLimit && remainingInvites <= 0
@@ -60,6 +67,10 @@ export function InvitePlayersDialog({
 
     setInvitedIds([])
     setSearch('')
+    setGuestName('')
+    setGuestLastFour('')
+    setGuestGender('MALE')
+    setGuestRole('PLAYER')
 
     async function init(): Promise<void> {
       try {
@@ -82,6 +93,10 @@ export function InvitePlayersDialog({
     void init()
   }, [open, hasLimit, matchId, currentUserId, showError])
 
+  function onlyDigits(value: string): string {
+    return value.replace(/\D+/g, '')
+  }
+
   async function handleInvite(userId: number): Promise<void> {
     setInvitingId(userId)
     showLoader('Invitando jugador...')
@@ -96,6 +111,40 @@ export function InvitePlayersDialog({
 
     setInvitedIds(prev => [...prev, userId])
     setInvitingId(null)
+  }
+
+  async function handleInviteGuest(): Promise<void> {
+    const name = guestName.trim()
+    if (!name) {
+      showError('Nombre requerido', 'Ingresá un nombre para el invitado')
+      return
+    }
+    setGuestSubmitting(true)
+    showLoader('Agregando invitado...')
+    const result = await inviteGuest(matchId, {
+      name,
+      phoneLastFour: guestLastFour.trim() || undefined,
+      gender: guestGender,
+      role: guestRole,
+    })
+    hideLoader()
+    setGuestSubmitting(false)
+
+    if (result?.error) {
+      showError('Error al intentar invitar', result.error)
+      return
+    }
+
+    // Reset form and refresh invite count (limit display)
+    setGuestName('')
+    setGuestLastFour('')
+    setGuestGender('MALE')
+    setGuestRole('PLAYER')
+
+    if (hasLimit) {
+      const r = await getInviteCount(matchId, currentUserId)
+      setMyInviteCount(r.count)
+    }
   }
 
   const availableUsers = users.filter(u => !currentParticipantIds.includes(u.id) && !invitedIds.includes(u.id))
@@ -115,6 +164,63 @@ export function InvitePlayersDialog({
               : 'Agrega jugadores al partido'}
           </DialogDescription>
         </DialogHeader>
+
+        {/* Guest quick-add */}
+        <div className="rounded-lg border border-border bg-muted/20 p-3 flex flex-col gap-2">
+          <p className="text-sm font-medium text-foreground">Invitado (sin registro)</p>
+
+          <div className="flex flex-col gap-2">
+            <Input
+              placeholder="Nombre del invitado"
+              value={guestName}
+              onChange={(e) => setGuestName(e.target.value)}
+              maxLength={255}
+              disabled={guestSubmitting || reachedLimit}
+            />
+
+            <div className="grid grid-cols-2 gap-2">
+              <Input
+                placeholder="Últimos 4 nros de tel (opcional)"
+                inputMode="numeric"
+                pattern="[0-9]*"
+                value={guestLastFour}
+                onChange={(e) => setGuestLastFour(onlyDigits(e.target.value).slice(-4))}
+                maxLength={4}
+                disabled={guestSubmitting || reachedLimit}
+              />
+
+              <select
+                value={guestGender}
+                onChange={(e) => setGuestGender(e.target.value as InviteGuestInput['gender'])}
+                disabled={guestSubmitting || reachedLimit}
+                className="h-9 px-2 rounded-md border border-border bg-background text-foreground text-sm"
+              >
+                <option value="MALE">Hombre</option>
+                <option value="FEMALE">Mujer</option>
+                <option value="OTHER">Otro</option>
+              </select>
+            </div>
+
+            <div className="grid grid-cols-2 gap-2">
+              <select
+                value={guestRole}
+                onChange={(e) => setGuestRole(e.target.value as InviteGuestInput['role'])}
+                disabled={guestSubmitting || reachedLimit}
+                className="h-9 px-2 rounded-md border border-border bg-background text-foreground text-sm"
+              >
+                <option value="PLAYER">Jugador</option>
+                <option value="SUBSTITUTE">Suplente</option>
+              </select>
+
+              <Button
+                onClick={() => void handleInviteGuest()}
+                disabled={guestSubmitting || reachedLimit}
+              >
+                {guestSubmitting ? <InlineLoader size="sm" /> : 'Agregar'}
+              </Button>
+            </div>
+          </div>
+        </div>
 
         <div className="relative">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />

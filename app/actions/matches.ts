@@ -304,25 +304,35 @@ export async function removeParticipant(matchId: number, participantId: number) 
     return { error: 'No autenticado' }
   }
 
+  // Admins can remove anyone.
+  // Additionally: the inviter (even if not admin) can remove only their guest participants.
   const isAdmin = await isMatchAdmin(matchId)
-  if (!isAdmin) {
-    return { error: 'Solo los administradores pueden quitar jugadores' }
-  }
 
   try {
     const participant = await sql`
-      SELECT user_id FROM match_participants
+      SELECT user_id, invited_by_user_id
+      FROM match_participants
       WHERE match_id = ${matchId} AND id = ${participantId}
     `
-    const userId = participant[0]?.user_id
-    if (!userId) {
+    if (participant.length === 0) {
       return { error: 'Jugador no encontrado' }
     }
 
-    await sql`
-      DELETE FROM match_admins
-      WHERE match_id = ${matchId} AND user_id = ${userId}
-    `
+    const userId = participant[0]?.user_id as number | null | undefined
+    const invitedByUserId = participant[0]?.invited_by_user_id as number | null | undefined
+
+    const canRemoveAsInviter = !isAdmin && userId === null && invitedByUserId === session.userId
+    if (!isAdmin && !canRemoveAsInviter) {
+      return { error: 'Solo los administradores pueden quitar jugadores' }
+    }
+
+    // Only registered users can be match admins
+    if (userId !== null && userId !== undefined) {
+      await sql`
+        DELETE FROM match_admins
+        WHERE match_id = ${matchId} AND user_id = ${userId}
+      `
+    }
     await sql`
       DELETE FROM match_participants
       WHERE match_id = ${matchId} AND id = ${participantId}
@@ -437,11 +447,11 @@ export async function randomizeTeams(matchId: number) {
   }
 
   try {
-    // Get all players (not substitutes) + their gender
+    // Get all players (not substitutes) + their gender (guests fallback to guest_gender)
     const playersRaw = await sql`
-      SELECT mp.id, u.gender
+      SELECT mp.id, COALESCE(u.gender, mp.guest_gender, 'MALE') as gender
       FROM match_participants mp
-      JOIN users u ON mp.user_id = u.id
+      LEFT JOIN users u ON mp.user_id = u.id
       WHERE mp.match_id = ${matchId} AND mp.role = 'PLAYER'
     `
 
@@ -545,16 +555,18 @@ export async function invitePlayer(matchId: number, userId: number, role: 'PLAYE
       return { error: 'Este jugador ya esta anotado' }
     }
 
-    // Check invite limit per player
+    // Check invite limit per player (ACTIVE invites only).
+    // The user requested that if an invited participant leaves/is kicked,
+    // the inviter recovers the slot.
     const matchData = await sql`SELECT invites_per_player FROM matches WHERE id = ${matchId}`
     const invitesPerPlayer = matchData[0]?.invites_per_player
-    
     if (invitesPerPlayer !== null && invitesPerPlayer !== undefined) {
       const inviteCount = await sql`
-        SELECT COUNT(*) as count FROM match_invites 
-        WHERE match_id = ${matchId} AND inviter_user_id = ${session.userId}
+        SELECT COUNT(*)::int as count
+        FROM match_participants
+        WHERE match_id = ${matchId} AND invited_by_user_id = ${session.userId}
       `
-      if (Number(inviteCount[0].count) >= invitesPerPlayer) {
+      if (Number(inviteCount[0]?.count ?? 0) >= invitesPerPlayer) {
         return { error: `Ya invitaste el maximo de ${invitesPerPlayer} jugador(es)` }
       }
     }
@@ -576,8 +588,8 @@ export async function invitePlayer(matchId: number, userId: number, role: 'PLAYE
         WHERE match_id = ${matchId}
           AND role = 'PLAYER'
       )
-      INSERT INTO match_participants (match_id, user_id, role)
-      SELECT ${matchId}, ${userId}, ${role}::participant_role
+      INSERT INTO match_participants (match_id, user_id, role, invited_by_user_id)
+      SELECT ${matchId}, ${userId}, ${role}::participant_role, ${session.userId}
       FROM match_data md, player_count pc
       WHERE (
         ${role}::text <> 'PLAYER'
@@ -594,18 +606,120 @@ export async function invitePlayer(matchId: number, userId: number, role: 'PLAYE
       return { error: 'El partido ya está lleno' }
     }
 
-    // Track the invite
-    await sql`
-      INSERT INTO match_invites (match_id, inviter_user_id, invited_user_id)
-      VALUES (${matchId}, ${session.userId}, ${userId})
-      ON CONFLICT (match_id, inviter_user_id, invited_user_id) DO NOTHING
-    `
+    // Note: match_invites is kept for backward compatibility / potential auditing,
+    // but the limit logic uses active participants.
 
     revalidatePath(`/dashboard/partido/${matchId}`)
     revalidatePath('/dashboard')
     return { success: true }
   } catch (error) {
     console.error('Error inviting player:', error)
+    return { error: 'Error al invitar jugador' }
+  }
+}
+
+export type InviteGuestInput = {
+  name: string
+  phoneLastFour?: string
+  gender: 'MALE' | 'FEMALE' | 'OTHER'
+  role: 'PLAYER' | 'SUBSTITUTE'
+}
+
+export async function inviteGuest(matchId: number, input: InviteGuestInput) {
+  const session = await getSession()
+  if (!session) {
+    return { error: 'No autenticado' }
+  }
+
+  const guestName = input.name.trim()
+  const rawLastFour = (input.phoneLastFour ?? '').trim()
+  const phoneLastFour = rawLastFour.replace(/\D+/g, '').slice(-4)
+  const role = input.role
+  const gender = input.gender
+
+  if (!guestName) {
+    return { error: 'Nombre requerido' }
+  }
+
+  if (role !== 'PLAYER' && role !== 'SUBSTITUTE') {
+    return { error: 'Rol invalido' }
+  }
+
+  if (gender !== 'MALE' && gender !== 'FEMALE' && gender !== 'OTHER') {
+    return { error: 'Genero invalido' }
+  }
+
+  try {
+    // Check invite limit per player (ACTIVE invites only)
+    const matchData = await sql`SELECT invites_per_player FROM matches WHERE id = ${matchId}`
+    const invitesPerPlayer = matchData[0]?.invites_per_player
+    if (invitesPerPlayer !== null && invitesPerPlayer !== undefined) {
+      const inviteCount = await sql`
+        SELECT COUNT(*)::int as count
+        FROM match_participants
+        WHERE match_id = ${matchId} AND invited_by_user_id = ${session.userId}
+      `
+      if (Number(inviteCount[0]?.count ?? 0) >= invitesPerPlayer) {
+        return { error: `Ya invitaste el maximo de ${invitesPerPlayer} jugador(es)` }
+      }
+    }
+
+    // Enforce capacity for PLAYER guests
+    const inserted = await sql`
+      WITH match_data AS (
+        SELECT
+          CASE
+            WHEN team_count > 0 THEN GREATEST(1, team_count) * GREATEST(1, team_size)
+            ELSE max_players
+          END AS max_players
+        FROM matches
+        WHERE id = ${matchId}
+      ),
+      player_count AS (
+        SELECT COUNT(*)::int AS count
+        FROM match_participants
+        WHERE match_id = ${matchId}
+          AND role = 'PLAYER'
+      )
+      INSERT INTO match_participants (
+        match_id,
+        user_id,
+        invited_by_user_id,
+        guest_name,
+        guest_phone_last_four,
+        guest_gender,
+        role
+      )
+      SELECT
+        ${matchId},
+        NULL,
+        ${session.userId},
+        ${guestName},
+        ${phoneLastFour || null},
+        ${gender}::user_gender,
+        ${role}::participant_role
+      FROM match_data md, player_count pc
+      WHERE (
+        ${role}::text <> 'PLAYER'
+        OR md.max_players <= 0
+        OR pc.count < md.max_players
+      )
+      RETURNING id
+    `
+
+    if (role === 'PLAYER') {
+      await autoBalanceTeamsIfFull(matchId)
+    }
+
+    if (inserted.length === 0) {
+      return { error: 'El partido ya está lleno' }
+    }
+
+    revalidatePath(`/dashboard/partido/${matchId}`)
+    revalidatePath('/dashboard')
+    return { success: true }
+  } catch (error) {
+    console.error('Error inviting guest:', error)
     return { error: 'Error al invitar jugador' }
   }
 }
@@ -991,7 +1105,7 @@ export async function changeParticipantRole(matchId: number, participantId: numb
         JOIN target t ON true
         WHERE mp.match_id = ${matchId}
           AND mp.role = 'PLAYER'
-          AND mp.user_id <> t.user_id
+          AND mp.id <> ${participantId}
       )
       UPDATE match_participants mp
       SET role = ${newRole}::participant_role,
@@ -1026,8 +1140,9 @@ export async function changeParticipantRole(matchId: number, participantId: numb
 export async function getInviteCount(matchId: number, userId: number) {
   try {
     const result = await sql`
-      SELECT COUNT(*) as count FROM match_invites 
-      WHERE match_id = ${matchId} AND inviter_user_id = ${userId}
+      SELECT COUNT(*)::int as count
+      FROM match_participants
+      WHERE match_id = ${matchId} AND invited_by_user_id = ${userId}
     `
     return { count: Number(result[0].count) }
   } catch {

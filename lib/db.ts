@@ -159,7 +159,11 @@ export async function initializeDatabase() {
     CREATE TABLE IF NOT EXISTS match_participants (
       id SERIAL PRIMARY KEY,
       match_id INTEGER NOT NULL REFERENCES matches(id) ON DELETE CASCADE,
-      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+      invited_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+      guest_name VARCHAR(255),
+      guest_phone_last_four VARCHAR(4),
+      guest_gender user_gender,
       role participant_role NOT NULL DEFAULT 'PLAYER',
       team team_side,
       team_number INTEGER,
@@ -169,6 +173,55 @@ export async function initializeDatabase() {
       UNIQUE(match_id, user_id)
     )
   `
+
+  // Guests/invites support (best-effort migrations)
+  try {
+    // Allow guest rows (user_id NULL)
+    await sql`ALTER TABLE match_participants ALTER COLUMN user_id DROP NOT NULL`
+
+    await sql`ALTER TABLE match_participants ADD COLUMN IF NOT EXISTS invited_by_user_id INTEGER`
+    await sql`ALTER TABLE match_participants ADD COLUMN IF NOT EXISTS guest_name VARCHAR(255)`
+    await sql`ALTER TABLE match_participants ADD COLUMN IF NOT EXISTS guest_phone_last_four VARCHAR(4)`
+    await sql`ALTER TABLE match_participants ADD COLUMN IF NOT EXISTS guest_gender user_gender`
+
+    // FKs (idempotent in spirit; may fail if constraint already exists with different name)
+    await sql`
+      DO $$
+      BEGIN
+        IF NOT EXISTS (
+          SELECT 1
+          FROM pg_constraint
+          WHERE conname = 'match_participants_invited_by_user_id_fkey'
+        ) THEN
+          ALTER TABLE match_participants
+            ADD CONSTRAINT match_participants_invited_by_user_id_fkey
+            FOREIGN KEY (invited_by_user_id) REFERENCES users(id) ON DELETE SET NULL;
+        END IF;
+      END $$;
+    `
+
+    // Replace UNIQUE(match_id,user_id) with a partial unique index that only applies to registered users.
+    // (Old unique constraint blocks multiple NULLs inconsistently across old schemas.)
+    await sql`ALTER TABLE match_participants DROP CONSTRAINT IF EXISTS match_participants_match_id_user_id_key`
+    await sql`DROP INDEX IF EXISTS idx_match_participants_match_user_unique`
+    await sql`
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_match_participants_match_user_unique
+      ON match_participants(match_id, user_id)
+      WHERE user_id IS NOT NULL
+    `
+
+    // Basic integrity: either a registered user or a guest name.
+    await sql`ALTER TABLE match_participants DROP CONSTRAINT IF EXISTS chk_match_participants_registered_or_guest`
+    await sql`
+      ALTER TABLE match_participants
+      ADD CONSTRAINT chk_match_participants_registered_or_guest
+      CHECK (
+        user_id IS NOT NULL OR guest_name IS NOT NULL
+      )
+    `
+  } catch {
+    // Ignore: best-effort for existing DBs
+  }
 
   await sql`
     CREATE TABLE IF NOT EXISTS stats (
