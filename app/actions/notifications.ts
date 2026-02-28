@@ -1,0 +1,133 @@
+'use server'
+
+import { getSession } from '@/lib/auth'
+import { sql } from '@/lib/db'
+import { revalidatePath } from 'next/cache'
+
+export type PushNotificationsSettings = {
+  newMatch: boolean
+  matchCancelled: boolean
+  matchFilled: boolean
+  matchChanges: boolean
+  cancellation: boolean
+  paymentReminder: boolean
+  reminder: boolean
+  reminderTime: number
+}
+
+const DEFAULTS: PushNotificationsSettings = {
+  newMatch: false,
+  matchCancelled: false,
+  matchFilled: false,
+  matchChanges: false,
+  cancellation: false,
+  paymentReminder: false,
+  reminder: false,
+  reminderTime: 60,
+}
+
+export async function getPushNotificationsSettings(): Promise<PushNotificationsSettings | null> {
+  const session = await getSession()
+  if (!session) return null
+
+  const rows = await sql`
+    SELECT new_match, match_cancelled, match_filled, match_changes, cancellation, payment_reminder, reminder, reminder_time
+    FROM push_notifications_settings
+    WHERE user_id = ${session.userId}
+  `
+
+  if (rows.length === 0) return { ...DEFAULTS }
+
+  const row = rows[0]
+  return {
+    newMatch: row.new_match as boolean,
+    matchCancelled: row.match_cancelled as boolean,
+    matchFilled: row.match_filled as boolean,
+    matchChanges: row.match_changes as boolean,
+    cancellation: row.cancellation as boolean,
+    paymentReminder: row.payment_reminder as boolean,
+    reminder: row.reminder as boolean,
+    reminderTime: row.reminder_time as number,
+  }
+}
+
+type UpdateResult = { success?: true; error?: string }
+
+export async function updatePushNotificationsSettings(formData: FormData): Promise<UpdateResult> {
+  const session = await getSession()
+  if (!session) return { error: 'No autenticado' }
+
+  const newMatch = formData.get('newMatch') === 'true'
+  const matchCancelled = formData.get('matchCancelled') === 'true'
+  const matchFilled = formData.get('matchFilled') === 'true'
+  const matchChanges = formData.get('matchChanges') === 'true'
+  const cancellation = formData.get('cancellation') === 'true'
+  const paymentReminder = formData.get('paymentReminder') === 'true'
+  const reminder = formData.get('reminder') === 'true'
+  const reminderTime = Math.max(5, Math.min(1440, Number(formData.get('reminderTime')) || 60))
+
+  try {
+    await sql`
+      INSERT INTO push_notifications_settings (user_id, new_match, match_cancelled, match_filled, match_changes, cancellation, payment_reminder, reminder, reminder_time)
+      VALUES (${session.userId}, ${newMatch}, ${matchCancelled}, ${matchFilled}, ${matchChanges}, ${cancellation}, ${paymentReminder}, ${reminder}, ${reminderTime})
+      ON CONFLICT (user_id)
+      DO UPDATE SET
+        new_match = ${newMatch},
+        match_cancelled = ${matchCancelled},
+        match_filled = ${matchFilled},
+        match_changes = ${matchChanges},
+        cancellation = ${cancellation},
+        payment_reminder = ${paymentReminder},
+        reminder = ${reminder},
+        reminder_time = ${reminderTime}
+    `
+
+    revalidatePath('/dashboard/configuracion')
+    return { success: true }
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : 'Error al guardar notificaciones' }
+  }
+}
+
+export type PushSubscriptionData = {
+  endpoint: string
+  p256dh: string
+  auth: string
+}
+
+export async function savePushSubscription(sub: PushSubscriptionData): Promise<UpdateResult> {
+  const session = await getSession()
+  if (!session) return { error: 'No autenticado' }
+
+  if (!sub.endpoint || !sub.p256dh || !sub.auth) {
+    return { error: 'Suscripción push inválida' }
+  }
+
+  try {
+    await sql`
+      INSERT INTO push_subscriptions (user_id, endpoint, p256dh, auth)
+      VALUES (${session.userId}, ${sub.endpoint}, ${sub.p256dh}, ${sub.auth})
+      ON CONFLICT (user_id, endpoint) DO UPDATE SET
+        p256dh = ${sub.p256dh},
+        auth = ${sub.auth}
+    `
+    return { success: true }
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : 'Error al guardar suscripción push' }
+  }
+}
+
+export async function deletePushSubscription(endpoint: string): Promise<UpdateResult> {
+  const session = await getSession()
+  if (!session) return { error: 'No autenticado' }
+
+  try {
+    await sql`
+      DELETE FROM push_subscriptions
+      WHERE user_id = ${session.userId} AND endpoint = ${endpoint}
+    `
+    return { success: true }
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : 'Error al eliminar suscripción push' }
+  }
+}

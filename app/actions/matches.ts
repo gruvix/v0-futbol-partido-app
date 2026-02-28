@@ -3,11 +3,20 @@
 import { sql } from '@/lib/db'
 import { getSession } from '@/lib/auth'
 import { revalidatePath } from 'next/cache'
+import {
+  sendMatchFilledPushIfNeeded,
+  sendMatchChangesPush,
+  sendNewMatchPush,
+  sendMatchCancelledPush,
+  sendPlayerLeftPush,
+} from '@/lib/push'
 
 function computedMaxPlayers(teamCount: number, teamSize: number): number {
   if (teamCount <= 0) return 0
   return Math.max(1, teamCount) * Math.max(1, teamSize)
 }
+
+const FIELDS_TRIGGERING_CHANGE_NOTIFICATION = ['title', 'date_time', 'location_type', 'location_custom', 'field'] as const
 
 async function autoBalanceTeamsIfFull(matchId: number) {
   const matchRows = await sql`
@@ -168,6 +177,7 @@ export async function createMatch(formData: FormData) {
     `
 
     revalidatePath('/dashboard')
+    await sendNewMatchPush(matchId as number, title, session.userId)
     return { success: true, matchId, redirect: `/dashboard/partido/${matchId}` }
   } catch (error) {
     console.error('Error creating match:', error)
@@ -256,6 +266,7 @@ export async function joinMatch(matchId: number, role: 'PLAYER' | 'SUBSTITUTE' =
 
     if (role === 'PLAYER') {
       await autoBalanceTeamsIfFull(matchId)
+      await sendMatchFilledPushIfNeeded(matchId)
     }
 
     revalidatePath(`/dashboard/partido/${matchId}`)
@@ -274,6 +285,9 @@ export async function leaveMatch(matchId: number) {
   }
 
   try {
+    // Send notification BEFORE removing participant so other participants can be queried
+    await sendPlayerLeftPush(matchId, session.userId)
+
     await sql`
       DELETE FROM match_participants 
       WHERE match_id = ${matchId} AND user_id = ${session.userId}
@@ -354,7 +368,7 @@ export async function deleteMatch(matchId: number) {
 
   // Check if user is the creator
   const match = await sql`
-    SELECT created_by_user_id FROM matches WHERE id = ${matchId}
+    SELECT created_by_user_id, title FROM matches WHERE id = ${matchId}
   `
 
   if (match.length === 0 || match[0].created_by_user_id !== session.userId) {
@@ -362,6 +376,8 @@ export async function deleteMatch(matchId: number) {
   }
 
   try {
+    // Send cancellation push BEFORE deleting (participants are cascade-deleted)
+    await sendMatchCancelledPush(matchId, String(match[0].title || 'Partido'), session.userId)
     await sql`DELETE FROM matches WHERE id = ${matchId}`
     revalidatePath('/dashboard')
     return { success: true, redirect: '/dashboard' }
@@ -599,11 +615,12 @@ export async function invitePlayer(matchId: number, userId: number, role: 'PLAYE
       RETURNING id
     `
 
-    if (role === 'PLAYER') {
-      await autoBalanceTeamsIfFull(matchId)
-    }
     if (inserted.length === 0) {
       return { error: 'El partido ya está lleno' }
+    }
+    if (role === 'PLAYER') {
+      await autoBalanceTeamsIfFull(matchId)
+      await sendMatchFilledPushIfNeeded(matchId)
     }
 
     // Note: match_invites is kept for backward compatibility / potential auditing,
@@ -707,12 +724,12 @@ export async function inviteGuest(matchId: number, input: InviteGuestInput) {
       RETURNING id
     `
 
-    if (role === 'PLAYER') {
-      await autoBalanceTeamsIfFull(matchId)
-    }
-
     if (inserted.length === 0) {
       return { error: 'El partido ya está lleno' }
+    }
+    if (role === 'PLAYER') {
+      await autoBalanceTeamsIfFull(matchId)
+      await sendMatchFilledPushIfNeeded(matchId)
     }
 
     revalidatePath(`/dashboard/partido/${matchId}`)
@@ -929,6 +946,9 @@ export async function updateMatchField(
 
     revalidatePath(`/dashboard/partido/${matchId}`)
     revalidatePath('/dashboard')
+    if (FIELDS_TRIGGERING_CHANGE_NOTIFICATION.includes(field as (typeof FIELDS_TRIGGERING_CHANGE_NOTIFICATION)[number])) {
+      await sendMatchChangesPush(matchId)
+    }
     return { success: true }
   } catch (error) {
     console.error('Error updating match:', error)
@@ -1121,12 +1141,12 @@ export async function changeParticipantRole(matchId: number, participantId: numb
         )
       RETURNING mp.id
     `
-    if (newRole === 'PLAYER') {
-      await autoBalanceTeamsIfFull(matchId)
-    }
-
     if (updated.length === 0 && newRole === 'PLAYER') {
       return { error: 'El partido ya está lleno' }
+    }
+    if (newRole === 'PLAYER') {
+      await autoBalanceTeamsIfFull(matchId)
+      await sendMatchFilledPushIfNeeded(matchId)
     }
     revalidatePath(`/dashboard/partido/${matchId}`)
     return { success: true }
