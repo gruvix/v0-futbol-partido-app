@@ -143,6 +143,7 @@ export async function initializeDatabase() {
     await sql`ALTER TABLE match_participants ADD COLUMN IF NOT EXISTS team_number INTEGER`
     await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS admin BOOLEAN DEFAULT false`
     await sql`ALTER TABLE matches ADD COLUMN IF NOT EXISTS field_rent_total INTEGER`
+    await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS pixel_avatar TEXT`
   } catch {
     // Columns might already exist
   }
