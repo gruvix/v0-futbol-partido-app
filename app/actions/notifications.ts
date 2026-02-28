@@ -78,3 +78,46 @@ export async function updatePushNotificationsSettings(formData: FormData): Promi
     return { error: error instanceof Error ? error.message : 'Error al guardar notificaciones' }
   }
 }
+
+export type PushSubscriptionData = {
+  endpoint: string
+  p256dh: string
+  auth: string
+}
+
+export async function savePushSubscription(sub: PushSubscriptionData): Promise<UpdateResult> {
+  const session = await getSession()
+  if (!session) return { error: 'No autenticado' }
+
+  if (!sub.endpoint || !sub.p256dh || !sub.auth) {
+    return { error: 'Suscripción push inválida' }
+  }
+
+  try {
+    await sql`
+      INSERT INTO push_subscriptions (user_id, endpoint, p256dh, auth)
+      VALUES (${session.userId}, ${sub.endpoint}, ${sub.p256dh}, ${sub.auth})
+      ON CONFLICT (user_id, endpoint) DO UPDATE SET
+        p256dh = ${sub.p256dh},
+        auth = ${sub.auth}
+    `
+    return { success: true }
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : 'Error al guardar suscripción push' }
+  }
+}
+
+export async function deletePushSubscription(endpoint: string): Promise<UpdateResult> {
+  const session = await getSession()
+  if (!session) return { error: 'No autenticado' }
+
+  try {
+    await sql`
+      DELETE FROM push_subscriptions
+      WHERE user_id = ${session.userId} AND endpoint = ${endpoint}
+    `
+    return { success: true }
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : 'Error al eliminar suscripción push' }
+  }
+}

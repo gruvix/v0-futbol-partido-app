@@ -1,12 +1,19 @@
 'use client'
 
-import React, { useEffect, useMemo, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { ArrowLeft, Save, Settings, LockKeyhole, Bell } from 'lucide-react'
 
 import { getCurrentUser, updateMyProfile, changeMyPassword } from '@/app/actions/auth'
-import { getPushNotificationsSettings, updatePushNotificationsSettings, type PushNotificationsSettings } from '@/app/actions/notifications'
+import {
+  getPushNotificationsSettings,
+  updatePushNotificationsSettings,
+  savePushSubscription,
+  deletePushSubscription,
+  type PushNotificationsSettings,
+} from '@/app/actions/notifications'
+import { urlBase64ToUint8Array } from '@/lib/push-utils'
 import { useErrorToast } from '@/components/error-toast-provider'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -67,6 +74,90 @@ export default function ConfiguracionPage(): React.JSX.Element {
     reminder: false,
     reminderTime: 60,
   })
+
+  const [pushPermission, setPushPermission] = useState<NotificationPermission | 'unsupported'>('default')
+  const swRegistrationRef = useRef<ServiceWorkerRegistration | null>(null)
+
+  // Register service worker on mount and track permission status
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
+      setPushPermission('unsupported')
+      return
+    }
+
+    setPushPermission(Notification.permission)
+
+    navigator.serviceWorker
+      .register('/sw.js')
+      .then((reg) => {
+        swRegistrationRef.current = reg
+      })
+      .catch((err) => {
+        console.error('SW registration failed:', err)
+      })
+  }, [])
+
+  /**
+   * Request push permission + subscribe and save to server.
+   * Returns true if the subscription was saved successfully.
+   */
+  const subscribeToPush = useCallback(async (): Promise<boolean> => {
+    const vapidKey = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY
+    if (!vapidKey) {
+      console.error('Missing NEXT_PUBLIC_VAPID_PUBLIC_KEY')
+      showError('Error', 'El servidor no tiene configuradas las claves VAPID para push')
+      return false
+    }
+
+    const permission = await Notification.requestPermission()
+    setPushPermission(permission)
+
+    if (permission !== 'granted') {
+      showError('Permiso denegado', 'Habilitá las notificaciones en la configuración del navegador para recibir avisos')
+      return false
+    }
+
+    const reg = swRegistrationRef.current ?? (await navigator.serviceWorker.ready)
+    swRegistrationRef.current = reg
+
+    let subscription = await reg.pushManager.getSubscription()
+    if (!subscription) {
+      subscription = await reg.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: urlBase64ToUint8Array(vapidKey),
+      })
+    }
+
+    const subJson = subscription.toJSON()
+    const result = await savePushSubscription({
+      endpoint: subscription.endpoint,
+      p256dh: subJson.keys?.p256dh ?? '',
+      auth: subJson.keys?.auth ?? '',
+    })
+
+    if (result.error) {
+      showError('Error', result.error)
+      return false
+    }
+    return true
+  }, [showError])
+
+  /**
+   * Unsubscribe from push and remove subscription from server.
+   */
+  const unsubscribeFromPush = useCallback(async (): Promise<void> => {
+    try {
+      const reg = swRegistrationRef.current ?? (await navigator.serviceWorker.ready)
+      const subscription = await reg.pushManager.getSubscription()
+      if (subscription) {
+        await deletePushSubscription(subscription.endpoint)
+        await subscription.unsubscribe()
+      }
+    } catch (err) {
+      console.error('Error unsubscribing from push:', err)
+    }
+  }, [])
 
   useEffect(() => {
     setLoadingUser(true)
@@ -156,6 +247,28 @@ export default function ConfiguracionPage(): React.JSX.Element {
     e.preventDefault()
     setSavingNotifications(true)
     try {
+      const anyEnabled =
+        notifications.newMatch ||
+        notifications.matchCancelled ||
+        notifications.matchFilled ||
+        notifications.cancellation ||
+        notifications.reminder
+
+      // If any notification is enabled, request permission + subscribe
+      if (anyEnabled && pushPermission !== 'unsupported') {
+        const ok = await subscribeToPush()
+        if (!ok) {
+          // Permission denied or subscription failed — don't save settings
+          setSavingNotifications(false)
+          return
+        }
+      }
+
+      // If all notifications disabled, unsubscribe
+      if (!anyEnabled && pushPermission !== 'unsupported') {
+        await unsubscribeFromPush()
+      }
+
       const fd = new FormData()
       fd.set('newMatch', String(notifications.newMatch))
       fd.set('matchCancelled', String(notifications.matchCancelled))
@@ -363,6 +476,16 @@ export default function ConfiguracionPage(): React.JSX.Element {
           <CardDescription className="text-muted-foreground">
             Elegí qué notificaciones querés recibir.
           </CardDescription>
+          {pushPermission === 'unsupported' && (
+            <p className="text-xs text-yellow-500 mt-1">
+              Tu navegador no soporta notificaciones push.
+            </p>
+          )}
+          {pushPermission === 'denied' && (
+            <p className="text-xs text-red-500 mt-1">
+              Las notificaciones están bloqueadas. Habilitálas en la configuración del navegador.
+            </p>
+          )}
         </CardHeader>
         <CardContent>
           <form onSubmit={handleSaveNotifications} className="flex flex-col gap-4">
