@@ -94,7 +94,7 @@ export function PixelAvatarEditor({ initialData, onSave, saving = false }: Pixel
             const x = (i % GRID_SIZE) * cellSize
             const y = Math.floor(i / GRID_SIZE) * cellSize
             // Checkerboard for transparent cells
-            const isEven = ((i % GRID_SIZE) + Math.floor(i / GRID_SIZE)) % 2 === 0
+            const isLightSquare = ((i % GRID_SIZE) + Math.floor(i / GRID_SIZE)) % 2 === 0
             return (
               <rect
                 key={i}
@@ -102,7 +102,7 @@ export function PixelAvatarEditor({ initialData, onSave, saving = false }: Pixel
                 y={y}
                 width={cellSize}
                 height={cellSize}
-                fill={color ?? (isEven ? '#e5e7eb' : '#d1d5db')}
+                fill={color ?? (isLightSquare ? '#e5e7eb' : '#d1d5db')}
                 onPointerDown={(e) => {
                   e.preventDefault()
                   handlePointerDown(i)
