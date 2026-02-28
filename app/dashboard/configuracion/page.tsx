@@ -70,6 +70,7 @@ export default function ConfiguracionPage(): React.JSX.Element {
     newMatch: false,
     matchCancelled: false,
     matchFilled: false,
+    matchChanges: false,
     cancellation: false,
     paymentReminder: false,
     reminder: false,
@@ -252,6 +253,7 @@ export default function ConfiguracionPage(): React.JSX.Element {
         notifications.newMatch ||
         notifications.matchCancelled ||
         notifications.matchFilled ||
+        notifications.matchChanges ||
         notifications.cancellation ||
         notifications.paymentReminder ||
         notifications.reminder
@@ -275,6 +277,7 @@ export default function ConfiguracionPage(): React.JSX.Element {
       fd.set('newMatch', String(notifications.newMatch))
       fd.set('matchCancelled', String(notifications.matchCancelled))
       fd.set('matchFilled', String(notifications.matchFilled))
+      fd.set('matchChanges', String(notifications.matchChanges))
       fd.set('cancellation', String(notifications.cancellation))
       fd.set('paymentReminder', String(notifications.paymentReminder))
       fd.set('reminder', String(notifications.reminder))
@@ -528,6 +531,19 @@ export default function ConfiguracionPage(): React.JSX.Element {
                 disabled={loadingUser || savingNotifications}
                 checked={notifications.matchFilled}
                 onCheckedChange={(v) => setNotifications((n) => ({ ...n, matchFilled: v }))}
+              />
+            </div>
+
+            <div className="flex items-center justify-between gap-4">
+              <div className="flex flex-col gap-0.5">
+                <Label htmlFor="notif-match-changes">Cambios en el partido</Label>
+                <p className="text-xs text-muted-foreground">Cuando cambian horario, lugar u otros datos del partido</p>
+              </div>
+              <Switch
+                id="notif-match-changes"
+                disabled={loadingUser || savingNotifications}
+                checked={notifications.matchChanges}
+                onCheckedChange={(v) => setNotifications((n) => ({ ...n, matchChanges: v }))}
               />
             </div>
 

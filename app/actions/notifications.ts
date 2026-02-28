@@ -8,6 +8,7 @@ export type PushNotificationsSettings = {
   newMatch: boolean
   matchCancelled: boolean
   matchFilled: boolean
+  matchChanges: boolean
   cancellation: boolean
   paymentReminder: boolean
   reminder: boolean
@@ -18,6 +19,7 @@ const DEFAULTS: PushNotificationsSettings = {
   newMatch: false,
   matchCancelled: false,
   matchFilled: false,
+  matchChanges: false,
   cancellation: false,
   paymentReminder: false,
   reminder: false,
@@ -29,7 +31,7 @@ export async function getPushNotificationsSettings(): Promise<PushNotificationsS
   if (!session) return null
 
   const rows = await sql`
-    SELECT new_match, match_cancelled, match_filled, cancellation, payment_reminder, reminder, reminder_time
+    SELECT new_match, match_cancelled, match_filled, match_changes, cancellation, payment_reminder, reminder, reminder_time
     FROM push_notifications_settings
     WHERE user_id = ${session.userId}
   `
@@ -41,6 +43,7 @@ export async function getPushNotificationsSettings(): Promise<PushNotificationsS
     newMatch: row.new_match as boolean,
     matchCancelled: row.match_cancelled as boolean,
     matchFilled: row.match_filled as boolean,
+    matchChanges: row.match_changes as boolean,
     cancellation: row.cancellation as boolean,
     paymentReminder: row.payment_reminder as boolean,
     reminder: row.reminder as boolean,
@@ -57,6 +60,7 @@ export async function updatePushNotificationsSettings(formData: FormData): Promi
   const newMatch = formData.get('newMatch') === 'true'
   const matchCancelled = formData.get('matchCancelled') === 'true'
   const matchFilled = formData.get('matchFilled') === 'true'
+  const matchChanges = formData.get('matchChanges') === 'true'
   const cancellation = formData.get('cancellation') === 'true'
   const paymentReminder = formData.get('paymentReminder') === 'true'
   const reminder = formData.get('reminder') === 'true'
@@ -64,13 +68,14 @@ export async function updatePushNotificationsSettings(formData: FormData): Promi
 
   try {
     await sql`
-      INSERT INTO push_notifications_settings (user_id, new_match, match_cancelled, match_filled, cancellation, payment_reminder, reminder, reminder_time)
-      VALUES (${session.userId}, ${newMatch}, ${matchCancelled}, ${matchFilled}, ${cancellation}, ${paymentReminder}, ${reminder}, ${reminderTime})
+      INSERT INTO push_notifications_settings (user_id, new_match, match_cancelled, match_filled, match_changes, cancellation, payment_reminder, reminder, reminder_time)
+      VALUES (${session.userId}, ${newMatch}, ${matchCancelled}, ${matchFilled}, ${matchChanges}, ${cancellation}, ${paymentReminder}, ${reminder}, ${reminderTime})
       ON CONFLICT (user_id)
       DO UPDATE SET
         new_match = ${newMatch},
         match_cancelled = ${matchCancelled},
         match_filled = ${matchFilled},
+        match_changes = ${matchChanges},
         cancellation = ${cancellation},
         payment_reminder = ${paymentReminder},
         reminder = ${reminder},
