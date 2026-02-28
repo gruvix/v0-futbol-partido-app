@@ -6,7 +6,10 @@ import { useRouter } from 'next/navigation'
 import { ArrowLeft, Save, Settings, LockKeyhole } from 'lucide-react'
 
 import { getCurrentUser, updateMyProfile, changeMyPassword } from '@/app/actions/auth'
+import { savePixelAvatar, getMyPixelAvatar } from '@/app/actions/avatar'
 import { useErrorToast } from '@/components/error-toast-provider'
+import { PixelAvatarEditor } from '@/components/pixel-avatar-editor'
+import { PixelAvatar } from '@/components/pixel-avatar'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -42,6 +45,8 @@ export default function ConfiguracionPage(): React.JSX.Element {
   const [loadingUser, setLoadingUser] = useState<boolean>(true)
   const [savingProfile, setSavingProfile] = useState<boolean>(false)
   const [savingPassword, setSavingPassword] = useState<boolean>(false)
+  const [savingAvatar, setSavingAvatar] = useState<boolean>(false)
+  const [avatarData, setAvatarData] = useState<string | null>(null)
 
   const [profile, setProfile] = useState<ProfileFormState>({
     name: '',
@@ -58,8 +63,8 @@ export default function ConfiguracionPage(): React.JSX.Element {
 
   useEffect(() => {
     setLoadingUser(true)
-    getCurrentUser()
-      .then((u) => {
+    Promise.all([getCurrentUser(), getMyPixelAvatar()])
+      .then(([u, avatar]) => {
         if (!u) {
           router.push('/login')
           return
@@ -70,6 +75,7 @@ export default function ConfiguracionPage(): React.JSX.Element {
           phoneLast4: u.phoneLast4 ?? '',
           gender: (u.gender ?? 'MALE') as UserGender,
         })
+        setAvatarData(avatar)
       })
       .catch((e: unknown) => {
         console.error(e)
@@ -110,6 +116,23 @@ export default function ConfiguracionPage(): React.JSX.Element {
       showError('Error al guardar')
     } finally {
       setSavingProfile(false)
+    }
+  }
+
+  async function handleSaveAvatar(data: string): Promise<void> {
+    setSavingAvatar(true)
+    try {
+      const result = await savePixelAvatar(data)
+      if (result?.error) {
+        showError('Error al guardar avatar', result.error)
+        return
+      }
+      setAvatarData(data)
+    } catch (e: unknown) {
+      console.error(e)
+      showError('Error al guardar avatar')
+    } finally {
+      setSavingAvatar(false)
     }
   }
 
@@ -245,6 +268,29 @@ export default function ConfiguracionPage(): React.JSX.Element {
               Guardar cambios
             </Button>
           </form>
+        </CardContent>
+      </Card>
+
+      <Card className="max-w-lg">
+        <CardHeader>
+          <CardTitle className="text-foreground flex items-center gap-2">
+            <PixelAvatar data={avatarData} size={20} />
+            Avatar
+          </CardTitle>
+          <CardDescription className="text-muted-foreground">
+            Pintá tu avatar pixel art de 16×16. Se mostrará en la cancha cuando te sumés a un partido.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          {loadingUser ? (
+            <p className="text-sm text-muted-foreground">Cargando...</p>
+          ) : (
+            <PixelAvatarEditor
+              initialData={avatarData}
+              onSave={handleSaveAvatar}
+              saving={savingAvatar}
+            />
+          )}
         </CardContent>
       </Card>
 

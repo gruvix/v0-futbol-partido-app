@@ -34,6 +34,7 @@ interface Participant {
   invited_by_name: string | null
   has_paid?: boolean | null
   payment_notes?: string | null
+  pixel_avatar?: string | null
 }
 
 interface Admin {
@@ -82,7 +83,8 @@ async function getParticipants(matchId: number, includePayments: boolean): Promi
         mp.invited_by_user_id,
         trim(initcap(inviter.name) || ' ' || initcap(inviter.last_name)) as invited_by_name,
         mp.has_paid,
-        mp.payment_notes
+        mp.payment_notes,
+        u.pixel_avatar
       FROM match_participants mp
       LEFT JOIN users u ON mp.user_id = u.id
       LEFT JOIN users inviter ON mp.invited_by_user_id = inviter.id
@@ -112,7 +114,8 @@ async function getParticipants(matchId: number, includePayments: boolean): Promi
       mp.invited_by_user_id,
       trim(initcap(inviter.name) || ' ' || initcap(inviter.last_name)) as invited_by_name,
       NULL::boolean AS has_paid,
-      NULL::text AS payment_notes
+      NULL::text AS payment_notes,
+      u.pixel_avatar
     FROM match_participants mp
     LEFT JOIN users u ON mp.user_id = u.id
     LEFT JOIN users inviter ON mp.invited_by_user_id = inviter.id

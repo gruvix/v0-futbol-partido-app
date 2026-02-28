@@ -48,6 +48,7 @@ import {
   updateParticipantPaymentNotes,
 } from '@/app/actions/matches'
 import { TeamAssignment } from '@/components/team-assignment'
+import { SoccerField } from '@/components/soccer-field'
 import { InvitePlayersDialog } from '@/components/invite-players-dialog'
 import { InlineLoader, useActionLoader } from '@/components/football-loader'
 import { EditableField } from '@/components/editable-field'
@@ -105,6 +106,7 @@ interface Participant {
   // include payment info to avoid leaking it.
   has_paid?: boolean | null
   payment_notes?: string | null
+  pixel_avatar?: string | null
 }
 
 interface Admin {
@@ -1465,6 +1467,12 @@ export function MatchDetailClient({
                 )}
               </div>
             </div>
+
+            {/* Soccer field visualization */}
+            <SoccerField
+              participants={effectiveParticipants}
+              maxPlayers={maxPlayers}
+            />
 
             {/* Dynamic team lists - TeamAssignment handles all cases including subs */}
             <TeamAssignment
