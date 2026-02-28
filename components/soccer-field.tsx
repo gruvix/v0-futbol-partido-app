@@ -16,28 +16,29 @@ interface SoccerFieldProps {
 }
 
 /**
- * Pre-defined positions (as % of field width/height) for up to 22 players.
- * Positions are arranged in a classic soccer formation layout.
+ * Pre-defined positions (as % of field width/height) for 5v5 futsal matches.
+ * Layout: GK – 2 defenders – 2 forwards per team, mirrored top/bottom.
  */
-const FIELD_POSITIONS: [number, number][] = [
-  // Row 1 - GK
-  [50, 90],
-  // Row 2 - Defense
-  [20, 74], [40, 70], [60, 70], [80, 74],
-  // Row 3 - Midfield
-  [15, 52], [38, 48], [62, 48], [85, 52],
-  // Row 4 - Attack
-  [30, 28], [50, 24], [70, 28],
-  // Second team / extra positions (mirrored)
-  [50, 10],
-  [20, 26], [40, 30], [60, 30], [80, 26],
-  [15, 48], [38, 52], [62, 52], [85, 48],
-  [30, 72],
+const FIELD_POSITIONS_5V5: [number, number][] = [
+  // --- Team A (bottom half) ---
+  // GK
+  [50, 92],
+  // Defense
+  [30, 74], [70, 74],
+  // Forwards
+  [30, 56], [70, 56],
+  // --- Team B (top half) ---
+  // GK
+  [50, 8],
+  // Defense
+  [30, 26], [70, 26],
+  // Forwards
+  [30, 44], [70, 44],
 ]
 
 export function SoccerField({ participants, maxPlayers }: SoccerFieldProps) {
   const players = useMemo(
-    () => participants.filter((p) => p.role === 'PLAYER').slice(0, Math.min(maxPlayers, FIELD_POSITIONS.length)),
+    () => participants.filter((p) => p.role === 'PLAYER').slice(0, Math.min(maxPlayers, FIELD_POSITIONS_5V5.length)),
     [participants, maxPlayers],
   )
 
@@ -77,17 +78,15 @@ export function SoccerField({ participants, maxPlayers }: SoccerFieldProps) {
 
       {/* Player avatars */}
       {players.map((player, i) => {
-        const [xPct, yPct] = FIELD_POSITIONS[i] ?? [50, 50]
+        const [xPct, yPct] = FIELD_POSITIONS_5V5[i] ?? [50, 50]
         return (
           <div
             key={player.id}
             className="absolute flex flex-col items-center gap-0.5 -translate-x-1/2 -translate-y-1/2"
             style={{ left: `${xPct}%`, top: `${yPct}%` }}
           >
-            <div className="rounded-sm overflow-hidden border border-white/40 shadow-sm bg-black/20">
-              <PixelAvatar data={player.pixel_avatar} size={24} />
-            </div>
-            <span className="text-[8px] font-medium text-white bg-black/50 rounded px-1 leading-tight max-w-[60px] truncate">
+            <PixelAvatar data={player.pixel_avatar} size={48} />
+            <span className="text-[9px] font-medium text-white bg-black/50 rounded px-1 leading-tight max-w-[70px] truncate">
               {player.name.split(' ')[0]}
             </span>
           </div>
