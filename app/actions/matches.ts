@@ -3,114 +3,20 @@
 import { sql } from '@/lib/db'
 import { getSession } from '@/lib/auth'
 import { revalidatePath } from 'next/cache'
+import {
+  sendMatchFilledPush,
+  sendMatchChangesPush,
+  sendNewMatchPush,
+  sendMatchCancelledPush,
+  sendPlayerLeftPush,
+} from '@/lib/push'
 
 function computedMaxPlayers(teamCount: number, teamSize: number): number {
   if (teamCount <= 0) return 0
   return Math.max(1, teamCount) * Math.max(1, teamSize)
 }
 
-type PushSubscriptionRow = { endpoint: string; p256dh: string; auth: string }
-const MAX_PARTICIPANTS_IN_PUSH_BODY = 6
 const FIELDS_TRIGGERING_CHANGE_NOTIFICATION = ['title', 'date_time', 'location_type', 'location_custom', 'field'] as const
-
-function getPushErrorStatusCode(error: unknown): number | null {
-  if (!error || typeof error !== 'object' || !('statusCode' in error)) return null
-  const statusCode = (error as { statusCode?: unknown }).statusCode
-  return typeof statusCode === 'number' ? statusCode : null
-}
-
-async function sendPushToSubscriptions(subscriptions: PushSubscriptionRow[], payload: { title: string; body: string; url?: string }) {
-  const vapidPublicKey = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY
-  const vapidPrivateKey = process.env.VAPID_PRIVATE_KEY
-  if (!vapidPublicKey || !vapidPrivateKey || subscriptions.length === 0) return
-
-  const webpush = (await import('web-push')).default
-  webpush.setVapidDetails(process.env.VAPID_SUBJECT || 'mailto:noreply@example.com', vapidPublicKey, vapidPrivateKey)
-
-  const serialized = JSON.stringify(payload)
-  await Promise.allSettled(
-    subscriptions.map(async (subscription) => {
-      try {
-        await webpush.sendNotification(
-          {
-            endpoint: subscription.endpoint,
-            keys: { p256dh: subscription.p256dh, auth: subscription.auth },
-          },
-          serialized
-        )
-      } catch (error: unknown) {
-        const statusCode = getPushErrorStatusCode(error)
-        if (statusCode === 404 || statusCode === 410) {
-          await sql`DELETE FROM push_subscriptions WHERE endpoint = ${subscription.endpoint}`
-        }
-      }
-    })
-  )
-}
-
-function buildParticipantNamesSummary(names: string[]): string {
-  if (names.length <= MAX_PARTICIPANTS_IN_PUSH_BODY) return names.join(', ')
-  return `${names.slice(0, MAX_PARTICIPANTS_IN_PUSH_BODY).join(', ')} +${names.length - MAX_PARTICIPANTS_IN_PUSH_BODY} más`
-}
-
-async function sendMatchFilledPushIfNeeded(matchId: number): Promise<void> {
-  const matchRows = await sql`
-    SELECT
-      title,
-      CASE WHEN team_count > 0 THEN GREATEST(1, team_count) * GREATEST(1, team_size) ELSE max_players END AS max_players
-    FROM matches
-    WHERE id = ${matchId}
-  `
-  const match = matchRows[0]
-  if (!match) return
-
-  const maxPlayers = Number(match.max_players || 0)
-  if (maxPlayers <= 0) return
-
-  const players = await sql`
-    SELECT COALESCE(trim(initcap(u.name) || ' ' || initcap(u.last_name)), mp.guest_name, 'Invitado') AS name
-    FROM match_participants mp
-    LEFT JOIN users u ON u.id = mp.user_id
-    WHERE mp.match_id = ${matchId} AND mp.role = 'PLAYER'
-    ORDER BY mp.id ASC
-  `
-  if (players.length !== maxPlayers) return
-
-  const subscriptions = await sql`
-    SELECT DISTINCT ps.endpoint, ps.p256dh, ps.auth
-    FROM match_participants mp
-    JOIN push_notifications_settings pns ON pns.user_id = mp.user_id
-    JOIN push_subscriptions ps ON ps.user_id = mp.user_id
-    WHERE mp.match_id = ${matchId}
-      AND mp.user_id IS NOT NULL
-      AND pns.match_filled = true
-  `
-
-  await sendPushToSubscriptions(subscriptions as PushSubscriptionRow[], {
-    title: 'Partido lleno',
-    body: `${String(match.title || 'El partido')} ya está completo. Jugadores: ${buildParticipantNamesSummary(players.map((p) => String(p.name)))}`,
-    url: `/dashboard/partido/${matchId}`,
-  })
-}
-
-async function sendMatchChangesPush(matchId: number): Promise<void> {
-  const matchRows = await sql`SELECT title FROM matches WHERE id = ${matchId}`
-  const title = String(matchRows[0]?.title || 'Partido')
-  const subscriptions = await sql`
-    SELECT DISTINCT ps.endpoint, ps.p256dh, ps.auth
-    FROM match_participants mp
-    JOIN push_notifications_settings pns ON pns.user_id = mp.user_id
-    JOIN push_subscriptions ps ON ps.user_id = mp.user_id
-    WHERE mp.match_id = ${matchId}
-      AND mp.user_id IS NOT NULL
-      AND pns.match_changes = true
-  `
-  await sendPushToSubscriptions(subscriptions as PushSubscriptionRow[], {
-    title: 'Cambios en el partido',
-    body: `${title} tuvo cambios de horario, lugar o datos del partido`,
-    url: `/dashboard/partido/${matchId}`,
-  })
-}
 
 async function autoBalanceTeamsIfFull(matchId: number) {
   const matchRows = await sql`
@@ -271,6 +177,7 @@ export async function createMatch(formData: FormData) {
     `
 
     revalidatePath('/dashboard')
+    await sendNewMatchPush(matchId as number, title, session.userId)
     return { success: true, matchId, redirect: `/dashboard/partido/${matchId}` }
   } catch (error) {
     console.error('Error creating match:', error)
@@ -359,7 +266,7 @@ export async function joinMatch(matchId: number, role: 'PLAYER' | 'SUBSTITUTE' =
 
     if (role === 'PLAYER') {
       await autoBalanceTeamsIfFull(matchId)
-      await sendMatchFilledPushIfNeeded(matchId)
+      await sendMatchFilledPush(matchId)
     }
 
     revalidatePath(`/dashboard/partido/${matchId}`)
@@ -378,6 +285,9 @@ export async function leaveMatch(matchId: number) {
   }
 
   try {
+    // Send notification BEFORE removing participant so other participants can be queried
+    await sendPlayerLeftPush(matchId, session.userId)
+
     await sql`
       DELETE FROM match_participants 
       WHERE match_id = ${matchId} AND user_id = ${session.userId}
@@ -458,7 +368,7 @@ export async function deleteMatch(matchId: number) {
 
   // Check if user is the creator
   const match = await sql`
-    SELECT created_by_user_id FROM matches WHERE id = ${matchId}
+    SELECT created_by_user_id, title FROM matches WHERE id = ${matchId}
   `
 
   if (match.length === 0 || match[0].created_by_user_id !== session.userId) {
@@ -466,6 +376,8 @@ export async function deleteMatch(matchId: number) {
   }
 
   try {
+    // Send cancellation push BEFORE deleting (participants are cascade-deleted)
+    await sendMatchCancelledPush(matchId, String(match[0].title || 'Partido'), session.userId)
     await sql`DELETE FROM matches WHERE id = ${matchId}`
     revalidatePath('/dashboard')
     return { success: true, redirect: '/dashboard' }
@@ -708,7 +620,7 @@ export async function invitePlayer(matchId: number, userId: number, role: 'PLAYE
     }
     if (role === 'PLAYER') {
       await autoBalanceTeamsIfFull(matchId)
-      await sendMatchFilledPushIfNeeded(matchId)
+      await sendMatchFilledPush(matchId)
     }
 
     // Note: match_invites is kept for backward compatibility / potential auditing,
@@ -817,7 +729,7 @@ export async function inviteGuest(matchId: number, input: InviteGuestInput) {
     }
     if (role === 'PLAYER') {
       await autoBalanceTeamsIfFull(matchId)
-      await sendMatchFilledPushIfNeeded(matchId)
+      await sendMatchFilledPush(matchId)
     }
 
     revalidatePath(`/dashboard/partido/${matchId}`)
@@ -1234,7 +1146,7 @@ export async function changeParticipantRole(matchId: number, participantId: numb
     }
     if (newRole === 'PLAYER') {
       await autoBalanceTeamsIfFull(matchId)
-      await sendMatchFilledPushIfNeeded(matchId)
+      await sendMatchFilledPush(matchId)
     }
     revalidatePath(`/dashboard/partido/${matchId}`)
     return { success: true }
