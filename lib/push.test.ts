@@ -34,7 +34,7 @@ import {
   sendNewMatchPush,
   sendMatchCancelledPush,
   sendPlayerLeftPush,
-  sendMatchFilledPush,
+  sendMatchFilledPushIfNeeded,
   sendMatchChangesPush,
 } from './push'
 
@@ -245,7 +245,7 @@ describe('sendPlayerLeftPush', () => {
   })
 })
 
-describe('sendMatchFilledPush', () => {
+describe('sendMatchFilledPushIfNeeded', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     resetState()
@@ -260,7 +260,7 @@ describe('sendMatchFilledPush', () => {
     ]
 
     const webpush = (await import('web-push')).default
-    await sendMatchFilledPush(1)
+    await sendMatchFilledPushIfNeeded(1)
     expect(webpush.sendNotification).not.toHaveBeenCalled()
   })
 
@@ -272,7 +272,7 @@ describe('sendMatchFilledPush', () => {
     ]
 
     const webpush = (await import('web-push')).default
-    await sendMatchFilledPush(1)
+    await sendMatchFilledPushIfNeeded(1)
 
     expect(webpush.sendNotification).toHaveBeenCalledTimes(1)
     const payload = JSON.parse(vi.mocked(webpush.sendNotification).mock.calls[0][1] as string)

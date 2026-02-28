@@ -44,7 +44,7 @@ export function buildParticipantNamesSummary(names: string[]): string {
   return `${names.slice(0, MAX_PARTICIPANTS_IN_PUSH_BODY).join(', ')} +${names.length - MAX_PARTICIPANTS_IN_PUSH_BODY} más`
 }
 
-export async function sendMatchFilledPush(matchId: number): Promise<void> {
+export async function sendMatchFilledPushIfNeeded(matchId: number): Promise<void> {
   const matchRows = await sql`
     SELECT
       title,

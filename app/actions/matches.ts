@@ -4,7 +4,7 @@ import { sql } from '@/lib/db'
 import { getSession } from '@/lib/auth'
 import { revalidatePath } from 'next/cache'
 import {
-  sendMatchFilledPush,
+  sendMatchFilledPushIfNeeded,
   sendMatchChangesPush,
   sendNewMatchPush,
   sendMatchCancelledPush,
@@ -266,7 +266,7 @@ export async function joinMatch(matchId: number, role: 'PLAYER' | 'SUBSTITUTE' =
 
     if (role === 'PLAYER') {
       await autoBalanceTeamsIfFull(matchId)
-      await sendMatchFilledPush(matchId)
+      await sendMatchFilledPushIfNeeded(matchId)
     }
 
     revalidatePath(`/dashboard/partido/${matchId}`)
@@ -620,7 +620,7 @@ export async function invitePlayer(matchId: number, userId: number, role: 'PLAYE
     }
     if (role === 'PLAYER') {
       await autoBalanceTeamsIfFull(matchId)
-      await sendMatchFilledPush(matchId)
+      await sendMatchFilledPushIfNeeded(matchId)
     }
 
     // Note: match_invites is kept for backward compatibility / potential auditing,
@@ -729,7 +729,7 @@ export async function inviteGuest(matchId: number, input: InviteGuestInput) {
     }
     if (role === 'PLAYER') {
       await autoBalanceTeamsIfFull(matchId)
-      await sendMatchFilledPush(matchId)
+      await sendMatchFilledPushIfNeeded(matchId)
     }
 
     revalidatePath(`/dashboard/partido/${matchId}`)
@@ -1146,7 +1146,7 @@ export async function changeParticipantRole(matchId: number, participantId: numb
     }
     if (newRole === 'PLAYER') {
       await autoBalanceTeamsIfFull(matchId)
-      await sendMatchFilledPush(matchId)
+      await sendMatchFilledPushIfNeeded(matchId)
     }
     revalidatePath(`/dashboard/partido/${matchId}`)
     return { success: true }
