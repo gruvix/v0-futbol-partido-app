@@ -284,5 +284,18 @@ export async function initializeDatabase() {
   await sql`CREATE INDEX IF NOT EXISTS idx_match_admins_user ON match_admins(user_id)`
   await sql`CREATE INDEX IF NOT EXISTS idx_stats_user ON stats(user_id)`
 
+  // Push notification preferences per user
+  await sql`
+    CREATE TABLE IF NOT EXISTS push_notifications_settings (
+      user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+      new_match BOOLEAN NOT NULL DEFAULT false,
+      match_cancelled BOOLEAN NOT NULL DEFAULT false,
+      match_filled BOOLEAN NOT NULL DEFAULT false,
+      cancellation BOOLEAN NOT NULL DEFAULT false,
+      reminder BOOLEAN NOT NULL DEFAULT false,
+      reminder_time INTEGER NOT NULL DEFAULT 60
+    )
+  `
+
   return { success: true }
 }

@@ -3,15 +3,17 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { ArrowLeft, Save, Settings, LockKeyhole } from 'lucide-react'
+import { ArrowLeft, Save, Settings, LockKeyhole, Bell } from 'lucide-react'
 
 import { getCurrentUser, updateMyProfile, changeMyPassword } from '@/app/actions/auth'
+import { getPushNotificationsSettings, updatePushNotificationsSettings, type PushNotificationsSettings } from '@/app/actions/notifications'
 import { useErrorToast } from '@/components/error-toast-provider'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
+import { Switch } from '@/components/ui/switch'
 import type { UserGender } from '@/lib/auth'
 
 type ProfileFormState = {
@@ -42,6 +44,7 @@ export default function ConfiguracionPage(): React.JSX.Element {
   const [loadingUser, setLoadingUser] = useState<boolean>(true)
   const [savingProfile, setSavingProfile] = useState<boolean>(false)
   const [savingPassword, setSavingPassword] = useState<boolean>(false)
+  const [savingNotifications, setSavingNotifications] = useState<boolean>(false)
 
   const [profile, setProfile] = useState<ProfileFormState>({
     name: '',
@@ -56,10 +59,19 @@ export default function ConfiguracionPage(): React.JSX.Element {
     newPasswordRepeat: '',
   })
 
+  const [notifications, setNotifications] = useState<PushNotificationsSettings>({
+    newMatch: false,
+    matchCancelled: false,
+    matchFilled: false,
+    cancellation: false,
+    reminder: false,
+    reminderTime: 60,
+  })
+
   useEffect(() => {
     setLoadingUser(true)
-    getCurrentUser()
-      .then((u) => {
+    Promise.all([getCurrentUser(), getPushNotificationsSettings()])
+      .then(([u, notifSettings]) => {
         if (!u) {
           router.push('/login')
           return
@@ -70,6 +82,9 @@ export default function ConfiguracionPage(): React.JSX.Element {
           phoneLast4: u.phoneLast4 ?? '',
           gender: (u.gender ?? 'MALE') as UserGender,
         })
+        if (notifSettings) {
+          setNotifications(notifSettings)
+        }
       })
       .catch((e: unknown) => {
         console.error(e)
@@ -134,6 +149,31 @@ export default function ConfiguracionPage(): React.JSX.Element {
       showError('Error al cambiar contraseña')
     } finally {
       setSavingPassword(false)
+    }
+  }
+
+  async function handleSaveNotifications(e: React.FormEvent<HTMLFormElement>): Promise<void> {
+    e.preventDefault()
+    setSavingNotifications(true)
+    try {
+      const fd = new FormData()
+      fd.set('newMatch', String(notifications.newMatch))
+      fd.set('matchCancelled', String(notifications.matchCancelled))
+      fd.set('matchFilled', String(notifications.matchFilled))
+      fd.set('cancellation', String(notifications.cancellation))
+      fd.set('reminder', String(notifications.reminder))
+      fd.set('reminderTime', String(notifications.reminderTime))
+
+      const result = await updatePushNotificationsSettings(fd)
+      if (result?.error) {
+        showError('Error al guardar notificaciones', result.error)
+        return
+      }
+    } catch (e: unknown) {
+      console.error(e)
+      showError('Error al guardar notificaciones')
+    } finally {
+      setSavingNotifications(false)
     }
   }
 
@@ -310,6 +350,110 @@ export default function ConfiguracionPage(): React.JSX.Element {
             <Button type="submit" className="gap-2" disabled={loadingUser || savingPassword}>
               <Save className="w-4 h-4" />
               Cambiar contraseña
+            </Button>
+          </form>
+        </CardContent>
+      </Card>
+      <Card className="max-w-lg">
+        <CardHeader>
+          <CardTitle className="text-foreground flex items-center gap-2">
+            <Bell className="w-4 h-4" />
+            Notificaciones push
+          </CardTitle>
+          <CardDescription className="text-muted-foreground">
+            Elegí qué notificaciones querés recibir.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <form onSubmit={handleSaveNotifications} className="flex flex-col gap-4">
+            <div className="flex items-center justify-between gap-4">
+              <div className="flex flex-col gap-0.5">
+                <Label htmlFor="notif-new-match">Nuevo partido creado</Label>
+                <p className="text-xs text-muted-foreground">Cuando se crea un nuevo partido</p>
+              </div>
+              <Switch
+                id="notif-new-match"
+                disabled={loadingUser || savingNotifications}
+                checked={notifications.newMatch}
+                onCheckedChange={(v) => setNotifications((n) => ({ ...n, newMatch: v }))}
+              />
+            </div>
+
+            <div className="flex items-center justify-between gap-4">
+              <div className="flex flex-col gap-0.5">
+                <Label htmlFor="notif-match-cancelled">Partido cancelado</Label>
+                <p className="text-xs text-muted-foreground">Cuando se cancela un partido</p>
+              </div>
+              <Switch
+                id="notif-match-cancelled"
+                disabled={loadingUser || savingNotifications}
+                checked={notifications.matchCancelled}
+                onCheckedChange={(v) => setNotifications((n) => ({ ...n, matchCancelled: v }))}
+              />
+            </div>
+
+            <div className="flex items-center justify-between gap-4">
+              <div className="flex flex-col gap-0.5">
+                <Label htmlFor="notif-match-filled">Partido lleno</Label>
+                <p className="text-xs text-muted-foreground">Cuando se completan los cupos de un partido</p>
+              </div>
+              <Switch
+                id="notif-match-filled"
+                disabled={loadingUser || savingNotifications}
+                checked={notifications.matchFilled}
+                onCheckedChange={(v) => setNotifications((n) => ({ ...n, matchFilled: v }))}
+              />
+            </div>
+
+            <div className="flex items-center justify-between gap-4">
+              <div className="flex flex-col gap-0.5">
+                <Label htmlFor="notif-cancellation">Baja de jugador</Label>
+                <p className="text-xs text-muted-foreground">Cuando alguien se da de baja de un partido en el que estás anotado</p>
+              </div>
+              <Switch
+                id="notif-cancellation"
+                disabled={loadingUser || savingNotifications}
+                checked={notifications.cancellation}
+                onCheckedChange={(v) => setNotifications((n) => ({ ...n, cancellation: v }))}
+              />
+            </div>
+
+            <div className="flex items-center justify-between gap-4">
+              <div className="flex flex-col gap-0.5">
+                <Label htmlFor="notif-reminder">Recordatorio de partido</Label>
+                <p className="text-xs text-muted-foreground">Un aviso antes de que empiece el partido</p>
+              </div>
+              <Switch
+                id="notif-reminder"
+                disabled={loadingUser || savingNotifications}
+                checked={notifications.reminder}
+                onCheckedChange={(v) => setNotifications((n) => ({ ...n, reminder: v }))}
+              />
+            </div>
+
+            {notifications.reminder && (
+              <div className="flex flex-col gap-2 pl-1">
+                <Label htmlFor="notif-reminder-time">Minutos antes del partido</Label>
+                <Input
+                  id="notif-reminder-time"
+                  type="number"
+                  min={5}
+                  max={1440}
+                  disabled={loadingUser || savingNotifications}
+                  value={notifications.reminderTime}
+                  onChange={(e) =>
+                    setNotifications((n) => ({ ...n, reminderTime: Number(e.target.value) || 60 }))
+                  }
+                />
+                <p className="text-xs text-muted-foreground">
+                  Entre 5 y 1440 minutos (24 hs)
+                </p>
+              </div>
+            )}
+
+            <Button type="submit" className="gap-2" disabled={loadingUser || savingNotifications}>
+              <Save className="w-4 h-4" />
+              Guardar notificaciones
             </Button>
           </form>
         </CardContent>
