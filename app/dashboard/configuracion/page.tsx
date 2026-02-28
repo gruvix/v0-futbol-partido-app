@@ -71,6 +71,7 @@ export default function ConfiguracionPage(): React.JSX.Element {
     matchCancelled: false,
     matchFilled: false,
     cancellation: false,
+    paymentReminder: false,
     reminder: false,
     reminderTime: 60,
   })
@@ -252,6 +253,7 @@ export default function ConfiguracionPage(): React.JSX.Element {
         notifications.matchCancelled ||
         notifications.matchFilled ||
         notifications.cancellation ||
+        notifications.paymentReminder ||
         notifications.reminder
 
       // If any notification is enabled, request permission + subscribe
@@ -274,6 +276,7 @@ export default function ConfiguracionPage(): React.JSX.Element {
       fd.set('matchCancelled', String(notifications.matchCancelled))
       fd.set('matchFilled', String(notifications.matchFilled))
       fd.set('cancellation', String(notifications.cancellation))
+      fd.set('paymentReminder', String(notifications.paymentReminder))
       fd.set('reminder', String(notifications.reminder))
       fd.set('reminderTime', String(notifications.reminderTime))
 
@@ -551,6 +554,19 @@ export default function ConfiguracionPage(): React.JSX.Element {
                 disabled={loadingUser || savingNotifications}
                 checked={notifications.reminder}
                 onCheckedChange={(v) => setNotifications((n) => ({ ...n, reminder: v }))}
+              />
+            </div>
+
+            <div className="flex items-center justify-between gap-4">
+              <div className="flex flex-col gap-0.5">
+                <Label htmlFor="notif-payment-reminder">Recordatorio de pago</Label>
+                <p className="text-xs text-muted-foreground">Cuánto le debés al creador del partido</p>
+              </div>
+              <Switch
+                id="notif-payment-reminder"
+                disabled={loadingUser || savingNotifications}
+                checked={notifications.paymentReminder}
+                onCheckedChange={(v) => setNotifications((n) => ({ ...n, paymentReminder: v }))}
               />
             </div>
 

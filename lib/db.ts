@@ -292,10 +292,12 @@ export async function initializeDatabase() {
       match_cancelled BOOLEAN NOT NULL DEFAULT false,
       match_filled BOOLEAN NOT NULL DEFAULT false,
       cancellation BOOLEAN NOT NULL DEFAULT false,
+      payment_reminder BOOLEAN NOT NULL DEFAULT false,
       reminder BOOLEAN NOT NULL DEFAULT false,
       reminder_time INTEGER NOT NULL DEFAULT 60
     )
   `
+  await sql`ALTER TABLE push_notifications_settings ADD COLUMN IF NOT EXISTS payment_reminder BOOLEAN NOT NULL DEFAULT false`
 
   // Push subscriptions (browser PushSubscription objects)
   await sql`
