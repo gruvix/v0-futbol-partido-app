@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react'
 import { Check, Search, UserPlus } from 'lucide-react'
 
 import { getAllUsers, getInviteCount, inviteGuest, invitePlayer, type InviteGuestInput } from '@/app/actions/matches'
+import { toast } from 'sonner'
 import { GenderIcon, type Gender } from '@/lib/gender'
 import { useErrorToast } from '@/components/error-toast-provider'
 import { InlineLoader, useActionLoader } from '@/components/football-loader'
@@ -58,6 +59,8 @@ export function InvitePlayersDialog({
   const [guestGender, setGuestGender] = useState<InviteGuestInput['gender']>('MALE')
   const [guestRole, setGuestRole] = useState<InviteGuestInput['role']>('PLAYER')
   const [guestSubmitting, setGuestSubmitting] = useState(false)
+  // keep track of invited guest names to prevent duplicates
+  const [invitedGuestNames, setInvitedGuestNames] = useState<string[]>([])
 
   const hasLimit = invitesPerPlayer !== null && invitesPerPlayer !== undefined
   const remainingInvites = hasLimit ? invitesPerPlayer - (myInviteCount + invitedIds.length) : Infinity
@@ -73,6 +76,8 @@ export function InvitePlayersDialog({
     setGuestLastFour('')
     setGuestGender('MALE')
     setGuestRole('PLAYER')
+    // reset duplicate tracking for each dialog session
+    setInvitedGuestNames([])
 
     async function init(): Promise<void> {
       try {
@@ -102,7 +107,7 @@ export function InvitePlayersDialog({
   async function handleInvite(userId: number): Promise<void> {
     setInvitingId(userId)
     showLoader('Invitando jugador...')
-    const result = await invitePlayer(matchId, userId, 'PLAYER')
+    const result = await invitePlayer(matchId, userId, 'PLAYER') as any
     hideLoader()
 
     if (result?.error) {
@@ -111,6 +116,8 @@ export function InvitePlayersDialog({
       return
     }
 
+    // successful invite: clear search and reset form state
+    setSearch('')
     setInvitedIds(prev => [...prev, userId])
     setInvitingId(null)
   }
@@ -121,6 +128,12 @@ export function InvitePlayersDialog({
       showError('Nombre requerido', 'Ingresá un nombre para el invitado')
       return
     }
+    // Prevent duplicate non‑registered invites by name before sending request
+    if (invitedGuestNames.includes(name)) {
+      toast.error('Ya existe un invitado con ese nombre')
+      return
+    }
+
     setGuestSubmitting(true)
     showLoader('Agregando invitado...')
     const result = await inviteGuest(matchId, {
@@ -128,20 +141,36 @@ export function InvitePlayersDialog({
       phoneLastFour: guestLastFour.trim() || undefined,
       gender: guestGender,
       role: guestRole,
-    })
+    }) as any
     hideLoader()
     setGuestSubmitting(false)
 
-    if (result?.error) {
-      showError('Error al intentar invitar', result.error)
+    if ((result as any)?.error) {
+      // Show error toast; result.error may be a string or an object with message
+      const description = typeof result.error === 'object' && result.error !== null && 'message' in result.error
+        ? (result.error as any).message
+        : String(result.error)
+      toast.error('Error al intentar invitar', { description })
       return
     }
 
-    // Reset form and refresh invite count (limit display)
+    // Prevent duplicate non‑registered invites by name
+    if (invitedGuestNames.includes(name)) {
+      toast.error('Ya existe un invitado con ese nombre')
+      return
+    }
+
+    // Show success toast
+    toast.success('Invitado agregado')
+
+    // Reset form, hide guest form, clear search and refresh invite count (limit display)
     setGuestName('')
     setGuestLastFour('')
     setGuestGender('MALE')
     setGuestRole('PLAYER')
+    setShowGuestForm(false)
+    setSearch('')
+    setInvitedGuestNames(prev => [...prev, name])
 
     if (hasLimit) {
       const r = await getInviteCount(matchId, currentUserId)
