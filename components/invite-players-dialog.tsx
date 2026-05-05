@@ -50,6 +50,7 @@ export function InvitePlayersDialog({
   const [invitedIds, setInvitedIds] = useState<number[]>([])
   const [search, setSearch] = useState('')
   const [myInviteCount, setMyInviteCount] = useState(0)
+  const [showGuestForm, setShowGuestForm] = useState(false)
 
   // Guest invite form
   const [guestName, setGuestName] = useState('')
@@ -67,6 +68,7 @@ export function InvitePlayersDialog({
 
     setInvitedIds([])
     setSearch('')
+    setShowGuestForm(false)
     setGuestName('')
     setGuestLastFour('')
     setGuestGender('MALE')
@@ -153,9 +155,14 @@ export function InvitePlayersDialog({
     u => u.name.toLowerCase().includes(search.toLowerCase()) || u.phone_last_four.includes(search)
   )
 
+  const handleStartGuestInvite = () => {
+    setGuestName(search)
+    setShowGuestForm(true)
+  }
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-md max-h-[80vh] overflow-hidden flex flex-col">
+      <DialogContent className="max-w-md max-h-[90vh] overflow-hidden flex flex-col">
         <DialogHeader>
           <DialogTitle>Invitar jugadores</DialogTitle>
           <DialogDescription>
@@ -164,63 +171,6 @@ export function InvitePlayersDialog({
               : 'Agrega jugadores al partido'}
           </DialogDescription>
         </DialogHeader>
-
-        {/* Guest quick-add */}
-        <div className="rounded-lg border border-border bg-muted/20 p-3 flex flex-col gap-2">
-          <p className="text-sm font-medium text-foreground">Invitado (sin registro)</p>
-
-          <div className="flex flex-col gap-2">
-            <Input
-              placeholder="Nombre del invitado"
-              value={guestName}
-              onChange={(e) => setGuestName(e.target.value)}
-              maxLength={255}
-              disabled={guestSubmitting || reachedLimit}
-            />
-
-            <div className="grid grid-cols-2 gap-2">
-              <Input
-                placeholder="Últimos 4 nros de tel (opcional)"
-                inputMode="numeric"
-                pattern="[0-9]*"
-                value={guestLastFour}
-                onChange={(e) => setGuestLastFour(onlyDigits(e.target.value).slice(-4))}
-                maxLength={4}
-                disabled={guestSubmitting || reachedLimit}
-              />
-
-              <select
-                value={guestGender}
-                onChange={(e) => setGuestGender(e.target.value as InviteGuestInput['gender'])}
-                disabled={guestSubmitting || reachedLimit}
-                className="h-9 px-2 rounded-md border border-border bg-background text-foreground text-sm"
-              >
-                <option value="MALE">Hombre</option>
-                <option value="FEMALE">Mujer</option>
-                <option value="OTHER">Otro</option>
-              </select>
-            </div>
-
-            <div className="grid grid-cols-2 gap-2">
-              <select
-                value={guestRole}
-                onChange={(e) => setGuestRole(e.target.value as InviteGuestInput['role'])}
-                disabled={guestSubmitting || reachedLimit}
-                className="h-9 px-2 rounded-md border border-border bg-background text-foreground text-sm"
-              >
-                <option value="PLAYER">Jugador</option>
-                <option value="SUBSTITUTE">Suplente</option>
-              </select>
-
-              <Button
-                onClick={() => void handleInviteGuest()}
-                disabled={guestSubmitting || reachedLimit}
-              >
-                {guestSubmitting ? <InlineLoader size="sm" /> : 'Agregar'}
-              </Button>
-            </div>
-          </div>
-        </div>
 
         <div className="relative">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
@@ -237,10 +187,6 @@ export function InvitePlayersDialog({
             <div className="flex items-center justify-center py-8">
               <InlineLoader />
             </div>
-          ) : filteredUsers.length === 0 ? (
-            <p className="text-muted-foreground text-sm text-center py-8">
-              {search ? 'No se encontraron jugadores' : 'Todos los jugadores ya están en el partido'}
-            </p>
           ) : (
             <div className="flex flex-col gap-2 py-2">
               {filteredUsers.map((user) => {
@@ -282,6 +228,106 @@ export function InvitePlayersDialog({
                   </div>
                 )
               })}
+
+              {!showGuestForm && (
+                <div
+                  className="flex items-center justify-between p-3 rounded-lg border border-yellow-500/50 bg-yellow-500/5 hover:bg-yellow-500/10 transition-colors cursor-pointer"
+                  onClick={handleStartGuestInvite}
+                >
+                  <div>
+                    <p className="font-medium text-foreground inline-flex items-center gap-1">
+                      <GenderIcon gender="OTHER" className="w-4 h-4 shrink-0" />
+                      <span>{search || 'Jugador nuevo'}</span>
+                    </p>
+                    <p className="text-sm text-muted-foreground">********</p>
+                  </div>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="gap-2 border-yellow-500/50 text-yellow-600 dark:text-yellow-400 hover:bg-yellow-500/20"
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      handleStartGuestInvite()
+                    }}
+                    disabled={reachedLimit}
+                  >
+                    <UserPlus className="w-4 h-4" />
+                    Invitar jugador no registrado
+                  </Button>
+                </div>
+              )}
+            </div>
+          )}
+
+          {showGuestForm && (
+            <div className="mt-4 mb-2 rounded-lg border border-border bg-muted/20 p-3 flex flex-col gap-2 animate-in fade-in slide-in-from-top-2">
+              <p className="text-sm font-medium text-foreground">Invitado (sin registro)</p>
+
+              <div className="flex flex-col gap-2">
+                <Input
+                  placeholder="Nombre del invitado"
+                  value={guestName}
+                  onChange={(e) => setGuestName(e.target.value)}
+                  maxLength={255}
+                  disabled={guestSubmitting || reachedLimit}
+                  autoFocus
+                />
+
+                <div className="grid grid-cols-2 gap-2">
+                  <Input
+                    placeholder="Últimos 4 nros de tel (opcional)"
+                    inputMode="numeric"
+                    pattern="[0-9]*"
+                    value={guestLastFour}
+                    onChange={(e) => setGuestLastFour(onlyDigits(e.target.value).slice(-4))}
+                    maxLength={4}
+                    disabled={guestSubmitting || reachedLimit}
+                  />
+
+                  <select
+                    value={guestGender}
+                    onChange={(e) => setGuestGender(e.target.value as InviteGuestInput['gender'])}
+                    disabled={guestSubmitting || reachedLimit}
+                    className="h-9 px-2 rounded-md border border-border bg-background text-foreground text-sm focus:ring-1 focus:ring-ring"
+                  >
+                    <option value="MALE">Hombre</option>
+                    <option value="FEMALE">Mujer</option>
+                    <option value="OTHER">Otro</option>
+                  </select>
+                </div>
+
+                <div className="grid grid-cols-2 gap-2">
+                  <select
+                    value={guestRole}
+                    onChange={(e) => setGuestRole(e.target.value as InviteGuestInput['role'])}
+                    disabled={guestSubmitting || reachedLimit}
+                    className="h-9 px-2 rounded-md border border-border bg-background text-foreground text-sm focus:ring-1 focus:ring-ring"
+                  >
+                    <option value="PLAYER">Jugador</option>
+                    <option value="SUBSTITUTE">Suplente</option>
+                  </select>
+
+                  <div className="flex gap-2">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="flex-1"
+                      onClick={() => setShowGuestForm(false)}
+                      disabled={guestSubmitting}
+                    >
+                      Cancelar
+                    </Button>
+                    <Button
+                      size="sm"
+                      className="flex-1"
+                      onClick={() => void handleInviteGuest()}
+                      disabled={guestSubmitting || reachedLimit}
+                    >
+                      {guestSubmitting ? <InlineLoader size="sm" /> : 'Invitar'}
+                    </Button>
+                  </div>
+                </div>
+              </div>
             </div>
           )}
         </div>

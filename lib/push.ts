@@ -1,4 +1,5 @@
 import { sql } from '@/lib/db'
+import webpush from 'web-push'
 
 export type PushSubscriptionRow = { endpoint: string; p256dh: string; auth: string }
 
@@ -15,7 +16,6 @@ export async function sendPushToSubscriptions(subscriptions: PushSubscriptionRow
   const vapidPrivateKey = process.env.VAPID_PRIVATE_KEY
   if (!vapidPublicKey || !vapidPrivateKey || subscriptions.length === 0) return
 
-  const webpush = (await import('web-push')).default
   webpush.setVapidDetails(process.env.VAPID_SUBJECT || 'mailto:noreply@example.com', vapidPublicKey, vapidPrivateKey)
 
   const serialized = JSON.stringify(payload)
