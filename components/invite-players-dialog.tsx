@@ -228,39 +228,39 @@ export function InvitePlayersDialog({
                   </div>
                 )
               })}
-
-              {!showGuestForm && (
-                <div
-                  className="flex items-center justify-between p-3 rounded-lg border border-yellow-500/50 bg-yellow-500/5 hover:bg-yellow-500/10 transition-colors cursor-pointer"
-                  onClick={handleStartGuestInvite}
-                >
-                  <div>
-                    <p className="font-medium text-foreground inline-flex items-center gap-1">
-                      <GenderIcon gender="OTHER" className="w-4 h-4 shrink-0" />
-                      <span>{search || 'Jugador nuevo'}</span>
-                    </p>
-                    <p className="text-sm text-muted-foreground">********</p>
-                  </div>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    className="gap-2 border-yellow-500/50 text-yellow-600 dark:text-yellow-400 hover:bg-yellow-500/20"
-                    onClick={(e) => {
-                      e.stopPropagation()
-                      handleStartGuestInvite()
-                    }}
-                    disabled={reachedLimit}
-                  >
-                    <UserPlus className="w-4 h-4" />
-                    Invitar jugador no registrado
-                  </Button>
-                </div>
-              )}
             </div>
           )}
+        </div>
 
-          {showGuestForm && (
-            <div className="mt-4 mb-2 rounded-lg border border-border bg-muted/20 p-3 flex flex-col gap-2 animate-in fade-in slide-in-from-top-2">
+        <div className="flex flex-col gap-2 pt-4 border-t border-border -mx-6 px-6 bg-background">
+          {!showGuestForm ? (
+            <div
+              className="flex items-center justify-between p-3 rounded-lg border border-yellow-500/50 bg-yellow-500/5 hover:bg-yellow-500/10 transition-colors cursor-pointer"
+              onClick={handleStartGuestInvite}
+            >
+              <div>
+                <p className="font-medium text-foreground inline-flex items-center gap-1">
+                  <GenderIcon gender="OTHER" className="w-4 h-4 shrink-0" />
+                  <span>{search || 'Jugador nuevo'}</span>
+                </p>
+                <p className="text-sm text-muted-foreground">********</p>
+              </div>
+              <Button
+                size="sm"
+                variant="outline"
+                className="gap-2 border-yellow-500/50 text-yellow-600 dark:text-yellow-400 hover:bg-yellow-500/20"
+                onClick={(e) => {
+                  e.stopPropagation()
+                  handleStartGuestInvite()
+                }}
+                disabled={reachedLimit}
+              >
+                <UserPlus className="w-4 h-4" />
+                Invitar jugador no registrado
+              </Button>
+            </div>
+          ) : (
+            <div className="mb-2 rounded-lg border border-border bg-muted/20 p-3 flex flex-col gap-2 animate-in fade-in slide-in-from-top-2">
               <p className="text-sm font-medium text-foreground">Invitado (sin registro)</p>
 
               <div className="flex flex-col gap-2">
