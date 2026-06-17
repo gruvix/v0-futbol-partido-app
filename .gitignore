@@ -19,6 +19,9 @@ yarn-error.log*
 # env files
 .env*
 
+# cursor local config
+.cursor/mcp.json
+
 # vercel
 .vercel
 
