@@ -34,6 +34,7 @@ interface InvitePlayersDialogProps {
   invitesPerPlayer?: number | null
   currentUserId: number
   canInviteAsPlayer: boolean
+  canOverridePlayerInvitePriority: boolean
   playerInviteDisabledReason?: string
 }
 
@@ -45,6 +46,7 @@ export function InvitePlayersDialog({
   invitesPerPlayer,
   currentUserId,
   canInviteAsPlayer,
+  canOverridePlayerInvitePriority,
   playerInviteDisabledReason,
 }: InvitePlayersDialogProps): React.JSX.Element {
   const router = useRouter()
@@ -72,8 +74,10 @@ export function InvitePlayersDialog({
   const hasLimit = invitesPerPlayer !== null && invitesPerPlayer !== undefined
   const remainingInvites = hasLimit ? invitesPerPlayer - (myInviteCount + invitedIds.length) : Infinity
   const reachedLimit = hasLimit && remainingInvites <= 0
-  const isPlayerInviteDisabled = !canInviteAsPlayer
+  const isPlayerInviteDisabled = !canInviteAsPlayer && !canOverridePlayerInvitePriority
+  const needsPlayerInviteOverride = !canInviteAsPlayer && canOverridePlayerInvitePriority
   const playerInviteReason = playerInviteDisabledReason || 'Los cupos de jugador estan reservados para suplentes por orden de anotacion.'
+  const overrideConfirmMessage = 'Estás por anotar a un jugador ignorando el orden de inscripción de suplentes. ¿Estás seguro?'
 
   useEffect(() => {
     if (!open) return
@@ -137,13 +141,17 @@ export function InvitePlayersDialog({
       setFeedback({ type: 'error', message: playerInviteReason })
       return
     }
+    const overridePriority = role === 'PLAYER' && needsPlayerInviteOverride
+    if (overridePriority && !window.confirm(overrideConfirmMessage)) {
+      return
+    }
 
     setInvitingId(userId)
     setFeedback(null)
     const roleLabel = role === 'PLAYER' ? 'jugador' : 'suplente'
     showLoader(`Invitando ${roleLabel}...`)
     await waitForNextPaint()
-    const result = await invitePlayer(matchId, userId, role) as any
+    const result = await invitePlayer(matchId, userId, role, overridePriority) as any
     hideLoader()
 
     if (result?.error) {
@@ -175,6 +183,10 @@ export function InvitePlayersDialog({
       setFeedback({ type: 'error', message: playerInviteReason })
       return
     }
+    const overridePriority = guestRole === 'PLAYER' && needsPlayerInviteOverride
+    if (overridePriority && !window.confirm(overrideConfirmMessage)) {
+      return
+    }
 
     setGuestSubmitting(true)
     setFeedback(null)
@@ -185,7 +197,7 @@ export function InvitePlayersDialog({
       phoneLastFour: guestLastFour.trim() || undefined,
       gender: guestGender,
       role: guestRole,
-    }) as any
+    }, overridePriority) as any
     hideLoader()
     setGuestSubmitting(false)
 
@@ -253,9 +265,15 @@ export function InvitePlayersDialog({
           </div>
         ) : null}
 
-        {isPlayerInviteDisabled ? (
-          <div className="rounded-lg border border-destructive/60 bg-destructive/10 p-3 text-sm text-destructive">
-            {playerInviteReason}
+        {!canInviteAsPlayer ? (
+          <div className={`rounded-lg border p-3 text-sm ${
+            canOverridePlayerInvitePriority
+              ? 'border-amber-500/60 bg-amber-500/10 text-amber-700 dark:text-amber-300'
+              : 'border-destructive/60 bg-destructive/10 text-destructive'
+          }`}>
+            {canOverridePlayerInvitePriority
+              ? `${playerInviteReason} Como administrador podés ignorar el orden, pero se pedirá confirmación.`
+              : playerInviteReason}
           </div>
         ) : null}
 

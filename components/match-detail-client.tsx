@@ -273,6 +273,7 @@ export function MatchDetailClient({
   const canManageRoster = isCreator || (isAdmin && currentUserIsOfficialPlayer)
   const playerJoinReservedForSubs = maxPlayers > 0 && freeOfficialSlots <= substitutes.length && substitutes.length > 0
   const canJoinAsOfficialPlayer = maxPlayers <= 0 || (freeOfficialSlots > 0 && !playerJoinReservedForSubs)
+  const canOverrideSubstitutePriority = canManageRoster && playerJoinReservedForSubs && freeOfficialSlots > 0
   const currentUserIsEligibleSubstitute = userParticipation
     ? eligibleSubstituteIds.has(userParticipation.id)
     : false
@@ -575,6 +576,16 @@ export function MatchDetailClient({
   }
 
   async function handlePromoteToPlayer(participantId: number) {
+    const participant = effectiveParticipants.find(p => p.id === participantId)
+    const needsPriorityOverride = Boolean(
+      participant?.role === 'SUBSTITUTE' &&
+      !eligibleSubstituteIds.has(participantId) &&
+      canOverrideSubstitutePriority
+    )
+    if (needsPriorityOverride && !window.confirm('Estás por ascender a un suplente ignorando el orden de inscripción. ¿Estás seguro?')) {
+      return
+    }
+
     setOptimisticOverrides(prev => ({ ...prev, [participantId]: { team: null, role: 'PLAYER' } }))
     setLoadingParticipantIds(prev => {
       const next = new Set(prev)
@@ -582,7 +593,7 @@ export function MatchDetailClient({
       return next
     })
     await waitForNextPaint()
-    const result = await changeParticipantRole(match.id, participantId, 'PLAYER')
+    const result = await changeParticipantRole(match.id, participantId, 'PLAYER', needsPriorityOverride)
     setLoadingParticipantIds(prev => {
       const next = new Set(prev)
       next.delete(participantId)
@@ -746,7 +757,25 @@ export function MatchDetailClient({
     }))
 
     if (selectedParticipant.role !== editRole) {
-      const roleResult = await changeParticipantRole(match.id, participantId, editRole)
+      const needsPriorityOverride = editRole === 'PLAYER' &&
+        selectedParticipant.role === 'SUBSTITUTE' &&
+        !eligibleSubstituteIds.has(participantId) &&
+        canOverrideSubstitutePriority
+      if (needsPriorityOverride && !window.confirm('Estás por ascender a un suplente ignorando el orden de inscripción. ¿Estás seguro?')) {
+        setLoadingParticipantIds(prev => {
+          const next = new Set(prev)
+          next.delete(participantId)
+          return next
+        })
+        setOptimisticOverrides(prev => {
+          const next = { ...prev }
+          delete next[participantId]
+          return next
+        })
+        return
+      }
+
+      const roleResult = await changeParticipantRole(match.id, participantId, editRole, needsPriorityOverride)
       if (roleResult?.error) {
         showError('Error al intentar actualizar rol', roleResult.error)
         setLoadingParticipantIds(prev => {
@@ -1514,6 +1543,7 @@ export function MatchDetailClient({
         invitesPerPlayer={match.invites_per_player}
         currentUserId={currentUserId}
         canInviteAsPlayer={canJoinAsOfficialPlayer}
+        canOverridePlayerInvitePriority={canOverrideSubstitutePriority}
         playerInviteDisabledReason={
           playerJoinReservedForSubs
             ? 'Los cupos libres estan reservados para suplentes por orden de anotacion.'

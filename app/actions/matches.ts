@@ -651,7 +651,12 @@ export async function randomizeTeams(matchId: number) {
   }
 }
 
-export async function invitePlayer(matchId: number, userId: number, role: 'PLAYER' | 'SUBSTITUTE' = 'PLAYER') {
+export async function invitePlayer(
+  matchId: number,
+  userId: number,
+  role: 'PLAYER' | 'SUBSTITUTE' = 'PLAYER',
+  overrideSubstitutePriority = false
+) {
   const session = await getSession()
   if (!session) {
     return { error: 'No autenticado' }
@@ -694,8 +699,11 @@ export async function invitePlayer(matchId: number, userId: number, role: 'PLAYE
       return { error: 'Partido no encontrado' }
     }
     if (role === 'PLAYER') {
+      const canOverridePriority = overrideSubstitutePriority && await canManageRoster(matchId, session.userId)
       if (!policy.canNewPlayerJoin) {
-        return { error: 'Hay suplentes con prioridad para ocupar el cupo' }
+        if (!canOverridePriority || policy.freeSlots <= 0) {
+          return { error: 'Hay suplentes con prioridad para ocupar el cupo' }
+        }
       }
       if (policy.freeSlots <= 0) {
         return { error: 'El partido ya está lleno' }
@@ -736,7 +744,7 @@ export type InviteGuestInput = {
   role: 'PLAYER' | 'SUBSTITUTE'
 }
 
-export async function inviteGuest(matchId: number, input: InviteGuestInput) {
+export async function inviteGuest(matchId: number, input: InviteGuestInput, overrideSubstitutePriority = false) {
   const session = await getSession()
   if (!session) {
     return { error: 'No autenticado' }
@@ -780,8 +788,11 @@ export async function inviteGuest(matchId: number, input: InviteGuestInput) {
       return { error: 'Partido no encontrado' }
     }
     if (role === 'PLAYER') {
+      const canOverridePriority = overrideSubstitutePriority && await canManageRoster(matchId, session.userId)
       if (!policy.canNewPlayerJoin) {
-        return { error: 'Hay suplentes con prioridad para ocupar el cupo' }
+        if (!canOverridePriority || policy.freeSlots <= 0) {
+          return { error: 'Hay suplentes con prioridad para ocupar el cupo' }
+        }
       }
       if (policy.freeSlots <= 0) {
         return { error: 'El partido ya está lleno' }
@@ -1190,7 +1201,12 @@ export async function getMatchAdmins(matchId: number) {
 }
 
 // Change participant role (promote sub to player, demote player to sub)
-export async function changeParticipantRole(matchId: number, participantId: number, newRole: 'PLAYER' | 'SUBSTITUTE') {
+export async function changeParticipantRole(
+  matchId: number,
+  participantId: number,
+  newRole: 'PLAYER' | 'SUBSTITUTE',
+  overrideSubstitutePriority = false
+) {
   const session = await getSession()
   if (!session) {
     return { error: 'No autenticado' }
@@ -1214,7 +1230,9 @@ export async function changeParticipantRole(matchId: number, participantId: numb
     if (newRole === 'PLAYER' && participant.role !== 'PLAYER') {
       const isEligibleSub = beforePolicy.eligibleSubstituteIds.includes(participantId)
       if (!isEligibleSub && !beforePolicy.canNewPlayerJoin) {
-        return { error: 'Hay suplentes con prioridad para ocupar el cupo' }
+        if (!overrideSubstitutePriority || beforePolicy.freeSlots <= 0) {
+          return { error: 'Hay suplentes con prioridad para ocupar el cupo' }
+        }
       }
       if (!isEligibleSub && beforePolicy.freeSlots <= 0) {
         return { error: 'El partido ya está lleno' }
