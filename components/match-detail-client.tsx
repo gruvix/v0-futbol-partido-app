@@ -1,13 +1,12 @@
 'use client'
 
-import { useCallback, useEffect, useRef, useState, type KeyboardEvent } from 'react'
+import { useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
-import { Textarea } from '@/components/ui/textarea'
 import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
@@ -24,10 +23,10 @@ import {
   ChevronLeft,
   ChevronRight,
   Pencil,
-  Save,
-  Wallet,
   UserRoundPlus,
   UserRoundMinus,
+  Check,
+  X,
 } from 'lucide-react'
 import { GenderIcon, type Gender } from '@/lib/gender'
 import {
@@ -43,9 +42,8 @@ import {
   addMatchAdmin,
   removeMatchAdmin,
   changeParticipantRole,
-  setParticipantPaymentStatus,
-  updateMatchFieldRentTotal,
-  updateParticipantPaymentNotes,
+  confirmEligibleSubstitute,
+  passEligibleSubstitute,
 } from '@/app/actions/matches'
 import { TeamAssignment } from '@/components/team-assignment'
 import { SoccerField } from '@/components/soccer-field'
@@ -53,6 +51,7 @@ import { InvitePlayersDialog } from '@/components/invite-players-dialog'
 import { InlineLoader, useActionLoader } from '@/components/football-loader'
 import { EditableField } from '@/components/editable-field'
 import { useErrorToast } from '@/components/error-toast-provider'
+import { waitForNextPaint } from '@/lib/wait-for-next-paint'
 import {
   Dialog,
   DialogContent,
@@ -71,7 +70,6 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
-import { cn } from '@/lib/utils'
 
 interface Match {
   id: number
@@ -88,6 +86,7 @@ interface Match {
   max_players: number
   invites_per_player: number | null
   field_rent_total: number | null
+  auto_admin_registered_players: boolean
 }
 
 interface Participant {
@@ -170,32 +169,19 @@ export function MatchDetailClient({
   const { showLoader, hideLoader } = useActionLoader()
   const { showError } = useErrorToast()
 
-  function formatCurrencyARS(value: number): string {
-    return new Intl.NumberFormat('es-AR', {
-      style: 'currency',
-      currency: 'ARS',
-      maximumFractionDigits: 0,
-    }).format(value)
-  }
-
-  function roundUpToPeso(value: number): number {
-    return Math.ceil(value)
-  }
-
-  function onlyDigits(value: string): string {
-    return value.replace(/\D+/g, '')
-  }
-
   function computedMaxPlayersValue(teamCount: number, teamSize: number): number {
     return Math.max(1, teamCount) * Math.max(1, teamSize)
   }
 
   async function handleFieldSave(field: string, value: string | number | boolean | null): Promise<void> {
     showLoader('Guardando...')
+    await waitForNextPaint()
     const result = await updateMatchField(match.id, field, value)
     hideLoader()
     if (result?.error) {
       showError('Error al intentar actualizar configuracion del partido')
+    } else {
+      router.refresh()
     }
   }
 
@@ -278,156 +264,21 @@ export function MatchDetailClient({
 
   const players = effectiveParticipants.filter(p => p.role === 'PLAYER')
   const substitutes = effectiveParticipants.filter(p => p.role === 'SUBSTITUTE')
+  const freeOfficialSlots = maxPlayers > 0 ? Math.max(0, maxPlayers - players.length) : Number.POSITIVE_INFINITY
+  const eligibleSubstitutes = Number.isFinite(freeOfficialSlots)
+    ? substitutes.slice(0, freeOfficialSlots)
+    : substitutes
+  const eligibleSubstituteIds = new Set(eligibleSubstitutes.map(p => p.id))
+  const currentUserIsOfficialPlayer = players.some(p => p.user_id === currentUserId)
+  const canManageRoster = isCreator || (isAdmin && currentUserIsOfficialPlayer)
+  const playerJoinReservedForSubs = maxPlayers > 0 && freeOfficialSlots <= substitutes.length && substitutes.length > 0
+  const canJoinAsOfficialPlayer = maxPlayers <= 0 || (freeOfficialSlots > 0 && !playerJoinReservedForSubs)
+  const canOverrideSubstitutePriority = canManageRoster && playerJoinReservedForSubs && freeOfficialSlots > 0
+  const currentUserIsEligibleSubstitute = userParticipation
+    ? eligibleSubstituteIds.has(userParticipation.id)
+    : false
 
   const { playerCount, substituteCount } = getParticipantCountsFromRoster(effectiveParticipants)
-
-  const isSubscribed = Boolean(userParticipation)
-  const activePlayersForPayments = players
-  const fieldRentTotal = match.field_rent_total ?? 0
-  const expectedPerPlayer = maxPlayers > 0 ? roundUpToPeso(fieldRentTotal / maxPlayers) : 0
-  const activeCount = activePlayersForPayments.length
-  const perActivePlayer = activeCount > 0 ? roundUpToPeso(fieldRentTotal / activeCount) : 0
-  const paidCount = activePlayersForPayments.filter(p => p.has_paid).length
-
-  const [editFieldRentTotal, setEditFieldRentTotal] = useState<string>(
-    match.field_rent_total === null || match.field_rent_total === undefined ? '' : match.field_rent_total.toString()
-  )
-
-  const fieldRentRaw = editFieldRentTotal.trim()
-  const fieldRentNextParsed = fieldRentRaw === '' ? null : Number.parseInt(fieldRentRaw, 10)
-  const isFieldRentInvalid = fieldRentRaw !== '' && (fieldRentNextParsed === null || !Number.isFinite(fieldRentNextParsed) || fieldRentNextParsed < 0)
-  const currentFieldRentRaw = match.field_rent_total === null || match.field_rent_total === undefined ? '' : match.field_rent_total.toString()
-  const isFieldRentSaveDisabled = isFieldRentInvalid || fieldRentRaw === currentFieldRentRaw
-
-  const [localNotes, setLocalNotes] = useState<Record<number, string>>(() => {
-    const entries = activePlayersForPayments.map(p => [p.id, p.payment_notes ?? ''] as const)
-    return Object.fromEntries(entries)
-  })
-
-  const noteTextareaRefs = useRef<Record<number, HTMLTextAreaElement | null>>({})
-  const [noteIsMultiline, setNoteIsMultiline] = useState<Record<number, boolean>>({})
-
-  const [notesSavingIds, setNotesSavingIds] = useState<Set<number>>(new Set())
-  const [paidSavingIds, setPaidSavingIds] = useState<Set<number>>(new Set())
-
-  useEffect(() => {
-    setEditFieldRentTotal(match.field_rent_total === null || match.field_rent_total === undefined ? '' : match.field_rent_total.toString())
-  }, [match.field_rent_total])
-
-  useEffect(() => {
-    const entries = activePlayersForPayments.map(p => [p.id, p.payment_notes ?? ''] as const)
-    setLocalNotes(Object.fromEntries(entries))
-  }, [participants, players.length])
-
-  const syncNoteTextareaSize = useCallback((participantId: number, el: HTMLTextAreaElement | null): void => {
-    if (!el) return
-
-    // Auto-grow textarea to fit content (including wrapped lines)
-    el.style.overflowY = 'hidden'
-    el.style.height = '0px'
-    el.style.height = `${el.scrollHeight}px`
-
-    const computed = window.getComputedStyle(el)
-    const lineHeightRaw = Number.parseFloat(computed.lineHeight)
-    const paddingTop = Number.parseFloat(computed.paddingTop)
-    const paddingBottom = Number.parseFloat(computed.paddingBottom)
-    const lineHeight = Number.isFinite(lineHeightRaw) ? lineHeightRaw : 20
-    const singleLineHeight = lineHeight + paddingTop + paddingBottom
-    const isMultiline = el.scrollHeight > singleLineHeight + 1
-
-    setNoteIsMultiline(prev => {
-      if (prev[participantId] === isMultiline) return prev
-      return { ...prev, [participantId]: isMultiline }
-    })
-  }, [])
-
-  // Re-evaluate wrapping on resize (textarea can become multiline just by shrinking the row)
-  useEffect(() => {
-    let rafId: number | null = null
-
-    const onResize = (): void => {
-      if (rafId !== null) {
-        window.cancelAnimationFrame(rafId)
-      }
-      rafId = window.requestAnimationFrame(() => {
-        for (const p of activePlayersForPayments) {
-          syncNoteTextareaSize(p.id, noteTextareaRefs.current[p.id])
-        }
-      })
-    }
-
-    window.addEventListener('resize', onResize)
-    return () => {
-      window.removeEventListener('resize', onResize)
-      if (rafId !== null) {
-        window.cancelAnimationFrame(rafId)
-      }
-    }
-  }, [activePlayersForPayments, syncNoteTextareaSize])
-
-  async function handleSaveFieldRentTotal(): Promise<void> {
-    const raw = editFieldRentTotal.trim()
-    const nextParsed = raw === '' ? null : Number.parseInt(raw, 10)
-    if (raw !== '' && (nextParsed === null || !Number.isFinite(nextParsed) || nextParsed < 0)) {
-      showError('Monto invalido', 'Ingresá un numero mayor o igual a 0')
-      return
-    }
-
-    showLoader('Guardando costo de cancha...')
-    const result = await updateMatchFieldRentTotal(match.id, nextParsed)
-    hideLoader()
-    if (result?.error) {
-      showError('Error al intentar actualizar costo de cancha', result.error)
-    } else {
-      router.refresh()
-    }
-  }
-
-  async function handleTogglePaid(participantId: number, hasPaid: boolean): Promise<void> {
-    if (!isAdmin) return
-    setPaidSavingIds(prev => {
-      const next = new Set(prev)
-      next.add(participantId)
-      return next
-    })
-
-    const result = await setParticipantPaymentStatus(match.id, participantId, hasPaid)
-
-    setPaidSavingIds(prev => {
-      const next = new Set(prev)
-      next.delete(participantId)
-      return next
-    })
-
-    if (result?.error) {
-      showError('Error al intentar actualizar pago', result.error)
-    } else {
-      router.refresh()
-    }
-  }
-
-  async function handleSaveNotes(participantId: number): Promise<void> {
-    const note = (localNotes[participantId] ?? '').trimEnd()
-    setNotesSavingIds(prev => {
-      const next = new Set(prev)
-      next.add(participantId)
-      return next
-    })
-
-    const result = await updateParticipantPaymentNotes(match.id, participantId, note)
-
-    setNotesSavingIds(prev => {
-      const next = new Set(prev)
-      next.delete(participantId)
-      return next
-    })
-
-    if (result?.error) {
-      showError('Error al intentar actualizar notas', result.error)
-    } else {
-      router.refresh()
-    }
-  }
 
   const getParticipantTeamNumber = (participant: Participant): number | null => {
     if (participant.team_number !== null && participant.team_number !== undefined) {
@@ -521,6 +372,7 @@ export function MatchDetailClient({
     }
 
     showLoader('Guardando...')
+    await waitForNextPaint()
     await applyTeamSettings(nextTeamCount, nextTeamSize, nextMaxPlayers)
     hideLoader()
     // Force refresh so UI immediately reflects new mode (teams vs no teams)
@@ -540,12 +392,55 @@ export function MatchDetailClient({
     setLoading(`join-${role}`)
     const roleLabels: Record<'PLAYER' | 'SUBSTITUTE', string> = { PLAYER: 'Jugador', SUBSTITUTE: 'Suplente' }
     showLoader(`Anotandote como ${roleLabels[role]}...`)
+    await waitForNextPaint()
     const result = await joinMatch(match.id, role)
     hideLoader()
     if (result?.error) {
       showError('Error al intentar anotarte', result.error)
+    } else {
+      router.refresh()
     }
     setLoading(null)
+  }
+
+  async function handleConfirmEligibleSubstitute(participantId: number) {
+    setLoadingParticipantIds(prev => {
+      const next = new Set(prev)
+      next.add(participantId)
+      return next
+    })
+    await waitForNextPaint()
+    const result = await confirmEligibleSubstitute(match.id, participantId)
+    setLoadingParticipantIds(prev => {
+      const next = new Set(prev)
+      next.delete(participantId)
+      return next
+    })
+    if (result?.error) {
+      showError('Error al intentar confirmar suplente', result.error)
+    } else {
+      router.refresh()
+    }
+  }
+
+  async function handlePassEligibleSubstitute(participantId: number) {
+    setLoadingParticipantIds(prev => {
+      const next = new Set(prev)
+      next.add(participantId)
+      return next
+    })
+    await waitForNextPaint()
+    const result = await passEligibleSubstitute(match.id, participantId)
+    setLoadingParticipantIds(prev => {
+      const next = new Set(prev)
+      next.delete(participantId)
+      return next
+    })
+    if (result?.error) {
+      showError('Error al intentar pasar turno', result.error)
+    } else {
+      router.refresh()
+    }
   }
 
   function handleLeaveClick() {
@@ -556,6 +451,7 @@ export function MatchDetailClient({
     setShowLeaveConfirm(false)
     setLoading('leave')
     showLoader('Abandonando partido...')
+    await waitForNextPaint()
     const result = await leaveMatch(match.id)
     hideLoader()
     if (result?.error) {
@@ -566,12 +462,14 @@ export function MatchDetailClient({
       setShowLastPlayerConfirm(true)
     } else {
       setLoading(null)
+      router.refresh()
     }
   }
 
   async function handleDelete() {
     setLoading('delete')
     showLoader('Eliminando partido...')
+    await waitForNextPaint()
     const result = await deleteMatch(match.id)
     if (result?.error) {
       showError('Error al intentar eliminar partido', result.error)
@@ -585,10 +483,13 @@ export function MatchDetailClient({
   async function handleRandomize() {
     setLoading('randomize')
     showLoader('Sorteando equipos...')
+    await waitForNextPaint()
     const result = await randomizeTeams(match.id)
     hideLoader()
     if (result?.error) {
       showError('Error al intentar sortear equipos', result.error)
+    } else {
+      router.refresh()
     }
     setLoading(null)
   }
@@ -610,6 +511,7 @@ export function MatchDetailClient({
       next.add(participantId)
       return next
     })
+    await waitForNextPaint()
 
     const result = await assignTeam(match.id, participantId, team)
 
@@ -628,6 +530,8 @@ export function MatchDetailClient({
         return next
       })
       showError('Error al intentar mover jugador a equipo', result.error)
+    } else {
+      router.refresh()
     }
     // On success, keep the override - it will be consistent with the revalidated data
     // and will be cleaned up when participants prop changes
@@ -649,6 +553,7 @@ export function MatchDetailClient({
       next.add(participantId)
       return next
     })
+    await waitForNextPaint()
 
     const result = await assignTeamNumber(match.id, participantId, teamNumber)
 
@@ -665,17 +570,30 @@ export function MatchDetailClient({
         return next
       })
       showError('Error al intentar mover jugador a equipo', result.error)
+    } else {
+      router.refresh()
     }
   }
 
   async function handlePromoteToPlayer(participantId: number) {
+    const participant = effectiveParticipants.find(p => p.id === participantId)
+    const needsPriorityOverride = Boolean(
+      participant?.role === 'SUBSTITUTE' &&
+      !eligibleSubstituteIds.has(participantId) &&
+      canOverrideSubstitutePriority
+    )
+    if (needsPriorityOverride && !window.confirm('Estás por ascender a un suplente ignorando el orden de inscripción. ¿Estás seguro?')) {
+      return
+    }
+
     setOptimisticOverrides(prev => ({ ...prev, [participantId]: { team: null, role: 'PLAYER' } }))
     setLoadingParticipantIds(prev => {
       const next = new Set(prev)
       next.add(participantId)
       return next
     })
-    const result = await changeParticipantRole(match.id, participantId, 'PLAYER')
+    await waitForNextPaint()
+    const result = await changeParticipantRole(match.id, participantId, 'PLAYER', needsPriorityOverride)
     setLoadingParticipantIds(prev => {
       const next = new Set(prev)
       next.delete(participantId)
@@ -688,6 +606,8 @@ export function MatchDetailClient({
         return next
       })
       showError('Error al intentar mover jugador a jugadores', result.error)
+    } else {
+      router.refresh()
     }
   }
 
@@ -698,6 +618,7 @@ export function MatchDetailClient({
       next.add(participantId)
       return next
     })
+    await waitForNextPaint()
     const result = await changeParticipantRole(match.id, participantId, 'SUBSTITUTE')
     setLoadingParticipantIds(prev => {
       const next = new Set(prev)
@@ -711,6 +632,8 @@ export function MatchDetailClient({
         return next
       })
       showError('Error al intentar mover jugador a suplentes', result.error)
+    } else {
+      router.refresh()
     }
   }
 
@@ -758,10 +681,13 @@ export function MatchDetailClient({
   async function confirmKickParticipant() {
     if (!showKickConfirm) return
     const participantId = showKickConfirm.id
+    await waitForNextPaint()
     const result = await removeParticipant(match.id, participantId)
     setKickLoadingId(null)
     if (result?.error) {
       showError('Error al intentar quitar jugador', result.error)
+    } else {
+      router.refresh()
     }
     setShowKickConfirm(null)
     closeParticipantPanel()
@@ -769,6 +695,10 @@ export function MatchDetailClient({
 
   async function handleSaveParticipantChanges() {
     if (!selectedParticipant) return
+    if (!canManageRoster) {
+      showError('No tenes permiso para mover jugadores')
+      return
+    }
     const participantId = selectedParticipant.id
     const userId = selectedParticipant.user_id
     const isCreatorUser = userId === match.created_by_user_id
@@ -778,6 +708,7 @@ export function MatchDetailClient({
       next.add(participantId)
       return next
     })
+    await waitForNextPaint()
 
     const nextTeamNumber = editRole === 'SUBSTITUTE' ? null : editTeamNumber
 
@@ -826,7 +757,25 @@ export function MatchDetailClient({
     }))
 
     if (selectedParticipant.role !== editRole) {
-      const roleResult = await changeParticipantRole(match.id, participantId, editRole)
+      const needsPriorityOverride = editRole === 'PLAYER' &&
+        selectedParticipant.role === 'SUBSTITUTE' &&
+        !eligibleSubstituteIds.has(participantId) &&
+        canOverrideSubstitutePriority
+      if (needsPriorityOverride && !window.confirm('Estás por ascender a un suplente ignorando el orden de inscripción. ¿Estás seguro?')) {
+        setLoadingParticipantIds(prev => {
+          const next = new Set(prev)
+          next.delete(participantId)
+          return next
+        })
+        setOptimisticOverrides(prev => {
+          const next = { ...prev }
+          delete next[participantId]
+          return next
+        })
+        return
+      }
+
+      const roleResult = await changeParticipantRole(match.id, participantId, editRole, needsPriorityOverride)
       if (roleResult?.error) {
         showError('Error al intentar actualizar rol', roleResult.error)
         setLoadingParticipantIds(prev => {
@@ -917,6 +866,7 @@ export function MatchDetailClient({
   async function confirmTeamReset() {
     if (!showTeamResetWarning) return
     showLoader('Guardando...')
+    await waitForNextPaint()
 
     // New behavior: keep everyone as PLAYER/SUBSTITUTE but clear team assignments.
     const normalize = await resetTeamsToNoTeam(match.id)
@@ -940,6 +890,11 @@ export function MatchDetailClient({
   }
 
   const isLoading = loading !== null
+  const canEditSelectedParticipant = Boolean(selectedParticipant) && canManageRoster && !isPast
+  const canKickSelectedParticipant = Boolean(selectedParticipant) && !isPast && (
+    (canManageRoster && selectedParticipant?.user_id !== match.created_by_user_id) ||
+    (Boolean(selectedParticipant?.is_guest) && selectedParticipant?.invited_by_user_id === currentUserId)
+  )
 
   return (
     <div className="flex flex-col gap-4 pb-8">
@@ -1108,11 +1063,15 @@ export function MatchDetailClient({
                 }
                 canEdit={isAdmin && !isPast}
                 onSave={async () => {
+                  showLoader('Guardando...')
+                  await waitForNextPaint()
                   await updateMatchField(match.id, 'location_type', editLocationType)
                   if (editLocationType === 'OTRO') {
                     await updateMatchField(match.id, 'location_custom', editLocationCustom)
                   }
                   await updateMatchField(match.id, 'field', editField || null)
+                  hideLoader()
+                  router.refresh()
                 }}
                 renderEditor={() => (
                   <div className="flex flex-col gap-3">
@@ -1403,7 +1362,7 @@ export function MatchDetailClient({
               <div className="flex flex-wrap gap-2">
                 <Button
                   onClick={() => handleJoin('PLAYER')}
-                  disabled={isLoading}
+                  disabled={isLoading || !canJoinAsOfficialPlayer}
                   className="gap-2"
                 >
                   {loading === 'join-PLAYER' ? (
@@ -1424,6 +1383,41 @@ export function MatchDetailClient({
                     <UserRoundPlus className="w-4 h-4" />
                   )}
                   Anotarme como suplente
+                </Button>
+              </div>
+              {!canJoinAsOfficialPlayer ? (
+                <p className="text-xs text-muted-foreground">
+                  {playerJoinReservedForSubs
+                    ? 'Los cupos libres estan reservados para suplentes por orden de anotacion.'
+                    : 'El partido ya esta completo. Podes anotarte como suplente.'}
+                </p>
+              ) : null}
+            </div>
+          )}
+
+          {!isPast && userParticipation?.role === 'SUBSTITUTE' && currentUserIsEligibleSubstitute && (
+            <div className="flex flex-col gap-2 rounded-lg border border-amber-500/60 bg-amber-500/10 p-3">
+              <p className="text-sm font-medium text-foreground">Hay un cupo para vos como jugador.</p>
+              <p className="text-xs text-muted-foreground">Confirmá si querés pasar a la lista oficial o pasá el turno.</p>
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  size="sm"
+                  className="gap-2"
+                  disabled={loadingParticipantIds.has(userParticipation.id)}
+                  onClick={() => handleConfirmEligibleSubstitute(userParticipation.id)}
+                >
+                  {loadingParticipantIds.has(userParticipation.id) ? <InlineLoader size="sm" /> : <Check className="w-4 h-4" />}
+                  Confirmar
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="gap-2"
+                  disabled={loadingParticipantIds.has(userParticipation.id)}
+                  onClick={() => handlePassEligibleSubstitute(userParticipation.id)}
+                >
+                  <X className="w-4 h-4" />
+                  Pasar
                 </Button>
               </div>
             </div>
@@ -1479,6 +1473,7 @@ export function MatchDetailClient({
               participants={players}
               substitutes={substitutes}
               isAdmin={isAdmin}
+              canManageRoster={canManageRoster}
               isPast={isPast}
               onAssignTeam={handleAssignTeam}
               onAssignTeamNumber={handleAssignTeamNumber}
@@ -1491,6 +1486,10 @@ export function MatchDetailClient({
               admins={admins}
               matchCreatorId={match.created_by_user_id}
               loadingParticipantIds={loadingParticipantIds}
+              eligibleSubstituteIds={eligibleSubstituteIds}
+              currentUserId={currentUserId}
+              onConfirmEligibleSubstitute={handleConfirmEligibleSubstitute}
+              onPassEligibleSubstitute={handlePassEligibleSubstitute}
             />
           </div>
 
@@ -1533,167 +1532,6 @@ export function MatchDetailClient({
             </div>
           )}
 
-          {/* Payments agenda (only visible for subscribed users) */}
-          {isSubscribed ? (
-            <div className="flex flex-col gap-3 p-3 rounded-lg border border-border bg-muted/30">
-              <div className="flex items-center justify-between gap-2 flex-wrap">
-                <div className="flex items-center gap-2">
-                  <Wallet className="w-4 h-4 text-primary" />
-                  <span className="font-medium text-sm text-foreground">Pagos</span>
-                  {fieldRentTotal > 0 ? (
-                    <Badge variant="secondary" className="text-xs">
-                      {paidCount}/{activeCount}
-                    </Badge>
-                  ) : null}
-                </div>
-
-                <div className="flex items-center gap-3 flex-wrap">
-                  {fieldRentTotal > 0 ? (
-                    <div className="flex items-start gap-2 text-xs text-muted-foreground">
-                      <span className="whitespace-nowrap">Precio por jugador</span>
-                      <div className="flex flex-col leading-tight">
-                        <span>
-                          ({maxPlayers} jugadores):{' '}
-                          <span className="text-foreground font-medium">{formatCurrencyARS(expectedPerPlayer)}</span>
-                        </span>
-                        {activeCount > 0 && expectedPerPlayer !== perActivePlayer ? (
-                          <span>
-                            ({activeCount} jugadores):{' '}
-                            <span className="text-foreground font-medium">{formatCurrencyARS(perActivePlayer)}</span>
-                          </span>
-                        ) : null}
-                      </div>
-                    </div>
-                  ) : null}
-
-                  {isAdmin && !isPast ? (
-                    <div className="relative">
-                      <Input
-                        type="text"
-                        inputMode="numeric"
-                        pattern="[0-9]*"
-                        value={editFieldRentTotal}
-                        onChange={(e) => setEditFieldRentTotal(onlyDigits(e.target.value))}
-                        onKeyDown={(e: KeyboardEvent<HTMLInputElement>) => {
-                          if (e.key !== 'Enter') return
-                          if (isFieldRentSaveDisabled) return
-                          e.preventDefault()
-                          void handleSaveFieldRentTotal()
-                        }}
-                        placeholder="Costo total"
-                        className="w-36 pr-9"
-                      />
-                      <button
-                        type="button"
-                        aria-label="Guardar costo"
-                        onClick={handleSaveFieldRentTotal}
-                        disabled={isFieldRentSaveDisabled}
-                        className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground disabled:opacity-40"
-                      >
-                        <Save className="w-4 h-4" />
-                      </button>
-                    </div>
-                  ) : (
-                    <span className="text-sm text-muted-foreground">
-                      Costo de cancha: {fieldRentTotal > 0 ? formatCurrencyARS(fieldRentTotal) : '—'}
-                    </span>
-                  )}
-                </div>
-              </div>
-
-              {activePlayersForPayments.length === 0 ? (
-                <span className="text-sm text-muted-foreground">No hay jugadores activos para calcular pagos.</span>
-              ) : (
-                <div className="flex flex-col gap-1">
-                  {activePlayersForPayments.map(p => {
-                    const canEditThisNote = (isAdmin || p.user_id === currentUserId) && !isPast
-                    const isSavingPaid = paidSavingIds.has(p.id)
-                    const isSavingNote = notesSavingIds.has(p.id)
-                    const currentNote = p.payment_notes ?? ''
-                    const draft = localNotes[p.id] ?? ''
-                    const hasNoteChanges = draft !== currentNote
-                    const isMultiline = Boolean(noteIsMultiline[p.id])
-                    // ...
-
-                    return (
-                      <div
-                        key={p.id}
-                        className="py-1"
-                      >
-                        <div className="flex items-start gap-2">
-                          <input
-                            type="checkbox"
-                            checked={Boolean(p.has_paid)}
-                            onChange={(e) => handleTogglePaid(p.id, e.target.checked)}
-                            disabled={!isAdmin || isPast || isSavingPaid}
-                            className="h-4 w-4 mt-1 accent-primary disabled:opacity-50"
-                            aria-label={`Pago de ${p.name}`}
-                          />
-
-                          <div
-                            className={cn(
-                              'min-w-0 flex-1 flex flex-col gap-1',
-                              // Small screens: always stacked. Larger screens: keep inline unless the note wraps.
-                              !isMultiline && 'sm:flex-row sm:items-center sm:gap-2',
-                            )}
-                          >
-                            <div className="min-w-0 flex items-center gap-1">
-                              <span className="text-sm font-medium truncate">{p.name}</span>
-                              <span className="text-sm text-muted-foreground truncate">({p.phone_last_four})</span>
-                            </div>
-
-                            <div
-                              className={cn(
-                                'min-w-0 flex flex-col gap-1',
-                                !isMultiline && 'sm:flex-1 sm:flex-row sm:items-center sm:gap-2',
-                              )}
-                            >
-                              <div className={cn('relative min-w-0', !isMultiline && 'sm:flex-1')}>
-                                <Textarea
-                                  ref={(el) => {
-                                    noteTextareaRefs.current[p.id] = el
-                                    syncNoteTextareaSize(p.id, el)
-                                  }}
-                                  rows={1}
-                                  placeholder={`Notas de ${p.name}...`}
-                                  value={draft}
-                                  onChange={(e) => {
-                                    const next = e.target.value
-                                    setLocalNotes(prev => ({ ...prev, [p.id]: next }))
-                                    syncNoteTextareaSize(p.id, e.currentTarget)
-                                  }}
-                                  onKeyDown={(e: KeyboardEvent<HTMLTextAreaElement>) => {
-                                    if (e.key !== 'Enter') return
-                                    if (!canEditThisNote || isSavingNote || !hasNoteChanges) return
-                                    e.preventDefault()
-                                    void handleSaveNotes(p.id)
-                                  }}
-                                  disabled={!canEditThisNote || isSavingNote}
-                                  className="min-h-8 resize-none overflow-hidden pr-9 py-1.5 placeholder:text-muted-foreground/80"
-                                />
-                                <button
-                                  type="button"
-                                  aria-label={`Guardar notas de ${p.name}`}
-                                  onClick={() => handleSaveNotes(p.id)}
-                                  disabled={!canEditThisNote || isSavingNote || !hasNoteChanges}
-                                  className={cn(
-                                    'absolute right-2 text-muted-foreground hover:text-foreground disabled:opacity-40',
-                                    isMultiline ? 'top-2' : 'top-1/2 -translate-y-1/2',
-                                  )}
-                                >
-                                  {isSavingNote ? <InlineLoader size="sm" /> : <Save className="w-4 h-4" />}
-                                </button>
-                              </div>
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-                    )
-                  })}
-                </div>
-              )}
-            </div>
-          ) : null}
         </CardContent>
       </Card>
 
@@ -1704,6 +1542,13 @@ export function MatchDetailClient({
         currentParticipantIds={participants.flatMap(p => (p.user_id === null ? [] : [p.user_id]))}
         invitesPerPlayer={match.invites_per_player}
         currentUserId={currentUserId}
+        canInviteAsPlayer={canJoinAsOfficialPlayer}
+        canOverridePlayerInvitePriority={canOverrideSubstitutePriority}
+        playerInviteDisabledReason={
+          playerJoinReservedForSubs
+            ? 'Los cupos libres estan reservados para suplentes por orden de anotacion.'
+            : 'El partido ya esta completo. Podes invitar como suplente.'
+        }
       />
 
       {/* Delete Confirmation Dialog */}
@@ -1850,7 +1695,7 @@ export function MatchDetailClient({
                         ? 'Administrador'
                         : 'Miembro'}
                   </span>
-                  {isAdmin && selectedParticipant.user_id !== match.created_by_user_id && (
+                  {canEditSelectedParticipant && selectedParticipant.user_id !== null && selectedParticipant.user_id !== match.created_by_user_id && (
                     <Button
                       type="button"
                       variant="outline"
@@ -1875,7 +1720,7 @@ export function MatchDetailClient({
                         const raw = e.target.value
                         setEditTeamNumber(raw === '' ? null : Number.parseInt(raw, 10))
                       }}
-                      disabled={editRole === 'SUBSTITUTE'}
+                      disabled={!canEditSelectedParticipant || editRole === 'SUBSTITUTE'}
                       className="h-9 px-2 rounded-md border border-border bg-background text-foreground text-sm disabled:opacity-60"
                     >
                       <option value="">Sin equipo</option>
@@ -1896,6 +1741,7 @@ export function MatchDetailClient({
                       variant={editRole === 'PLAYER' ? 'default' : 'outline'}
                       size="sm"
                       onClick={() => setEditRole('PLAYER')}
+                      disabled={!canEditSelectedParticipant}
                     >
                       Jugador
                     </Button>
@@ -1907,6 +1753,7 @@ export function MatchDetailClient({
                         setEditRole('SUBSTITUTE')
                         setEditTeamNumber(null)
                       }}
+                      disabled={!canEditSelectedParticipant}
                     >
                       Suplente
                     </Button>
@@ -1919,11 +1766,7 @@ export function MatchDetailClient({
 
           <DialogFooter>
             <div className="flex flex-col gap-2 sm:flex-row sm:justify-end">
-              {(isAdmin && selectedParticipant?.user_id !== match.created_by_user_id) || (
-                !isPast &&
-                Boolean(selectedParticipant?.is_guest) &&
-                selectedParticipant?.invited_by_user_id === currentUserId
-              ) ? (
+              {canKickSelectedParticipant ? (
                 <Button
                   type="button"
                   variant="destructive"
@@ -1940,6 +1783,7 @@ export function MatchDetailClient({
                 type="button"
                 onClick={handleSaveParticipantChanges}
                 disabled={(() => {
+                  if (!canEditSelectedParticipant) return true
                   if (!selectedParticipant || !initialEditState) return true
                   const changed =
                     editRole !== initialEditState.role ||

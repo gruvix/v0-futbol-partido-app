@@ -11,7 +11,13 @@ export function getPushErrorStatusCode(error: unknown): number | null {
   return typeof statusCode === 'number' ? statusCode : null
 }
 
+export function shouldSendPushNotifications(): boolean {
+  return process.env.VERCEL_ENV === 'production' && process.env.VERCEL_GIT_COMMIT_REF === 'main'
+}
+
 export async function sendPushToSubscriptions(subscriptions: PushSubscriptionRow[], payload: { title: string; body: string; url?: string }) {
+  if (!shouldSendPushNotifications()) return
+
   const vapidPublicKey = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY
   const vapidPrivateKey = process.env.VAPID_PRIVATE_KEY
   if (!vapidPublicKey || !vapidPrivateKey || subscriptions.length === 0) return
@@ -99,6 +105,29 @@ export async function sendMatchChangesPush(matchId: number): Promise<void> {
   await sendPushToSubscriptions(subscriptions as PushSubscriptionRow[], {
     title: 'Cambios en el partido',
     body: `${title} tuvo cambios de horario, lugar o datos del partido`,
+    url: `/dashboard/partido/${matchId}`,
+  })
+}
+
+export async function sendEligibleSubstitutesPush(matchId: number, participantIds: number[]): Promise<void> {
+  if (participantIds.length === 0) return
+
+  const matchRows = await sql`SELECT title FROM matches WHERE id = ${matchId}`
+  const matchTitle = String(matchRows[0]?.title || 'Partido')
+
+  const subscriptions = await sql`
+    SELECT DISTINCT ps.endpoint, ps.p256dh, ps.auth
+    FROM match_participants mp
+    JOIN push_subscriptions ps ON ps.user_id = mp.user_id
+    WHERE mp.match_id = ${matchId}
+      AND mp.id = ANY(${participantIds}::int[])
+      AND mp.user_id IS NOT NULL
+      AND mp.role = 'SUBSTITUTE'
+  `
+
+  await sendPushToSubscriptions(subscriptions as PushSubscriptionRow[], {
+    title: 'Te toca confirmar',
+    body: `Hay un cupo libre en ${matchTitle}. Confirmá si querés pasar a jugador.`,
     url: `/dashboard/partido/${matchId}`,
   })
 }

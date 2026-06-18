@@ -9,7 +9,9 @@ import {
   sendNewMatchPush,
   sendMatchCancelledPush,
   sendPlayerLeftPush,
+  sendEligibleSubstitutesPush,
 } from '@/lib/push'
+import { computeMatchCapacity, computeRosterPolicy, type RosterParticipant } from '@/lib/match-roster'
 
 function computedMaxPlayers(teamCount: number, teamSize: number): number {
   if (teamCount <= 0) return 0
@@ -17,6 +19,132 @@ function computedMaxPlayers(teamCount: number, teamSize: number): number {
 }
 
 const FIELDS_TRIGGERING_CHANGE_NOTIFICATION = ['title', 'date_time', 'location_type', 'location_custom', 'field'] as const
+
+type ParticipantRole = 'PLAYER' | 'SUBSTITUTE'
+
+type ParticipantActionRow = {
+  id: number
+  user_id: number | null
+  invited_by_user_id: number | null
+  role: ParticipantRole
+}
+
+function normalizeRole(role: unknown): ParticipantRole {
+  return role === 'SUBSTITUTE' || role === 'EXTRA' ? 'SUBSTITUTE' : 'PLAYER'
+}
+
+async function getRosterParticipants(matchId: number): Promise<RosterParticipant[]> {
+  const rows = await sql`
+    SELECT id, user_id, role::text AS role, created_at
+    FROM match_participants
+    WHERE match_id = ${matchId}
+    ORDER BY created_at ASC, id ASC
+  `
+
+  return rows.map((row) => ({
+    id: Number(row.id),
+    userId: row.user_id === null || row.user_id === undefined ? null : Number(row.user_id),
+    role: normalizeRole(row.role),
+    createdAt: row.created_at as string | Date,
+  }))
+}
+
+async function getRosterPolicy(matchId: number) {
+  const matchRows = await sql`
+    SELECT team_count, team_size, max_players
+    FROM matches
+    WHERE id = ${matchId}
+  `
+  const match = matchRows[0]
+  if (!match) return null
+
+  return computeRosterPolicy(
+    computeMatchCapacity({
+      team_count: Number(match.team_count || 0),
+      team_size: Number(match.team_size || 0),
+      max_players: Number(match.max_players || 0),
+    }),
+    await getRosterParticipants(matchId)
+  )
+}
+
+async function getMatchAutoAdmin(matchId: number): Promise<boolean> {
+  const rows = await sql`
+    SELECT COALESCE(auto_admin_registered_players, false) AS auto_admin_registered_players
+    FROM matches
+    WHERE id = ${matchId}
+  `
+  return Boolean(rows[0]?.auto_admin_registered_players)
+}
+
+async function addAutoAdminForOfficialPlayer(matchId: number, userId: number | null): Promise<void> {
+  if (userId === null) return
+  if (!(await getMatchAutoAdmin(matchId))) return
+
+  await sql`
+    INSERT INTO match_admins (match_id, user_id)
+    VALUES (${matchId}, ${userId})
+    ON CONFLICT (match_id, user_id) DO NOTHING
+  `
+}
+
+async function removeAutoAdminIfEnabled(matchId: number, userId: number | null): Promise<void> {
+  if (userId === null) return
+  if (!(await getMatchAutoAdmin(matchId))) return
+
+  await sql`
+    DELETE FROM match_admins
+    WHERE match_id = ${matchId} AND user_id = ${userId}
+  `
+}
+
+async function getParticipantForAction(matchId: number, participantId: number): Promise<ParticipantActionRow | null> {
+  const rows = await sql`
+    SELECT id, user_id, invited_by_user_id, role::text AS role
+    FROM match_participants
+    WHERE match_id = ${matchId} AND id = ${participantId}
+  `
+  const row = rows[0]
+  if (!row) return null
+  return {
+    id: Number(row.id),
+    user_id: row.user_id === null || row.user_id === undefined ? null : Number(row.user_id),
+    invited_by_user_id: row.invited_by_user_id === null || row.invited_by_user_id === undefined ? null : Number(row.invited_by_user_id),
+    role: normalizeRole(row.role),
+  }
+}
+
+async function canManageRoster(matchId: number, userId: number): Promise<boolean> {
+  const rows = await sql`
+    SELECT
+      EXISTS (
+        SELECT 1 FROM matches
+        WHERE id = ${matchId} AND created_by_user_id = ${userId}
+      ) AS is_creator,
+      EXISTS (
+        SELECT 1
+        FROM match_admins ma
+        JOIN match_participants mp
+          ON mp.match_id = ma.match_id
+         AND mp.user_id = ma.user_id
+        WHERE ma.match_id = ${matchId}
+          AND ma.user_id = ${userId}
+          AND mp.role = 'PLAYER'
+      ) AS is_official_player_admin
+  `
+
+  return Boolean(rows[0]?.is_creator || rows[0]?.is_official_player_admin)
+}
+
+async function notifyNewEligibleSubstitutes(matchId: number, previousEligibleIds: number[] = []): Promise<void> {
+  const policy = await getRosterPolicy(matchId)
+  if (!policy) return
+  const previous = new Set(previousEligibleIds)
+  const newlyEligibleIds = policy.eligibleSubstituteIds.filter((id) => !previous.has(id))
+  if (newlyEligibleIds.length === 0) return
+
+  await sendEligibleSubstitutesPush(matchId, newlyEligibleIds)
+}
 
 async function autoBalanceTeamsIfFull(matchId: number) {
   const matchRows = await sql`
@@ -139,6 +267,7 @@ export async function createMatch(formData: FormData) {
   const maxPlayers = teamCount > 0 ? computedMaxPlayers(teamCount, teamSize) : requestedMaxPlayers
   const invitesPerPlayerStr = formData.get('invitesPerPlayer') as string
   const invitesPerPlayer = invitesPerPlayerStr ? parseInt(invitesPerPlayerStr) : null
+  const autoAdminRegisteredPlayers = formData.get('autoAdminRegisteredPlayers') === 'true'
 
   // Get creator's name for default title
   const user = await sql`SELECT trim(initcap(name) || ' ' || initcap(last_name)) as full_name FROM users WHERE id = ${session.userId}`
@@ -157,8 +286,8 @@ export async function createMatch(formData: FormData) {
 
   try {
     const result = await sql`
-      INSERT INTO matches (created_by_user_id, date_time, location_type, location_custom, field, is_public, title, team_count, team_size, max_players, invites_per_player)
-      VALUES (${session.userId}, ${dateTime.toISOString()}, ${locationType}, ${locationCustom || null}, ${field || null}, ${isPublic}, ${title}, ${teamCount}, ${teamSize}, ${maxPlayers}, ${invitesPerPlayer})
+      INSERT INTO matches (created_by_user_id, date_time, location_type, location_custom, field, is_public, title, team_count, team_size, max_players, invites_per_player, auto_admin_registered_players)
+      VALUES (${session.userId}, ${dateTime.toISOString()}, ${locationType}, ${locationCustom || null}, ${field || null}, ${isPublic}, ${title}, ${teamCount}, ${teamSize}, ${maxPlayers}, ${invitesPerPlayer}, ${autoAdminRegisteredPlayers})
       RETURNING id
     `
     
@@ -197,76 +326,56 @@ export async function joinMatch(matchId: number, role: 'PLAYER' | 'SUBSTITUTE' =
   }
 
   try {
-    // Enforce capacity when trying to join as PLAYER.
-    // Fullness is based on total amount of non-substitute players registered in the match,
-    // i.e. role === 'PLAYER' across all teams + no-team list.
-    // (SUBSTITUTE does not consume a player slot.)
+    const policy = await getRosterPolicy(matchId)
+    if (!policy) {
+      return { error: 'Partido no encontrado' }
+    }
 
-    const upsert = await sql`
-      WITH match_data AS (
-        SELECT
-          CASE
-            WHEN team_count > 0 THEN GREATEST(1, team_count) * GREATEST(1, team_size)
-            ELSE max_players
-          END AS max_players
-        FROM matches
-        WHERE id = ${matchId}
-      ),
-      player_count AS (
-        SELECT COUNT(*)::int AS count
-        FROM match_participants
-        WHERE match_id = ${matchId}
-          AND role = 'PLAYER'
-          AND user_id <> ${session.userId}
-      ),
-      existing AS (
-        SELECT id, role
-        FROM match_participants
-        WHERE match_id = ${matchId} AND user_id = ${session.userId}
-      ),
-      do_update AS (
-        UPDATE match_participants mp
-        SET role = ${role}::participant_role
-        FROM match_data md, player_count pc, existing e
-        WHERE mp.id = e.id
-          AND (
-            ${role}::text <> 'PLAYER'
-            OR e.role = 'PLAYER'
-            OR md.max_players <= 0
-            OR pc.count < md.max_players
-          )
-        RETURNING mp.id
-      ),
-      do_insert AS (
-        INSERT INTO match_participants (match_id, user_id, role)
-        SELECT ${matchId}, ${session.userId}, ${role}::participant_role
-        FROM match_data md, player_count pc
-        WHERE NOT EXISTS (SELECT 1 FROM existing)
-          AND (
-            ${role}::text <> 'PLAYER'
-            OR md.max_players <= 0
-            OR pc.count < md.max_players
-          )
-        RETURNING id
-      )
-      SELECT id FROM do_update
-      UNION ALL
-      SELECT id FROM do_insert
+    const existingRows = await sql`
+      SELECT id, role::text AS role
+      FROM match_participants
+      WHERE match_id = ${matchId} AND user_id = ${session.userId}
     `
+    const existing = existingRows[0]
+      ? { id: Number(existingRows[0].id), role: normalizeRole(existingRows[0].role) }
+      : null
+    const previousEligibleIds = policy.eligibleSubstituteIds
 
-    if (upsert.length === 0) {
-      // Either the match doesn't exist, or capacity was reached.
-      // Disambiguate for a better message.
-      const matchExists = await sql`SELECT 1 FROM matches WHERE id = ${matchId}`
-      if (matchExists.length === 0) {
-        return { error: 'Partido no encontrado' }
+    if (role === 'PLAYER') {
+      const isExistingPlayer = existing?.role === 'PLAYER'
+      const isEligibleSub = existing ? policy.eligibleSubstituteIds.includes(existing.id) : false
+      if (!isExistingPlayer && !isEligibleSub && !policy.canNewPlayerJoin) {
+        return { error: 'Hay suplentes con prioridad para ocupar el cupo' }
       }
-      return { error: 'El partido ya está lleno' }
+      if (!isExistingPlayer && !isEligibleSub && policy.freeSlots <= 0) {
+        return { error: 'El partido ya está lleno' }
+      }
+    }
+
+    if (existing) {
+      await sql`
+        UPDATE match_participants
+        SET role = ${role}::participant_role,
+            team = CASE WHEN ${role}::text = 'SUBSTITUTE' THEN NULL ELSE team END,
+            team_number = CASE WHEN ${role}::text = 'SUBSTITUTE' THEN NULL ELSE team_number END
+        WHERE id = ${existing.id} AND match_id = ${matchId}
+      `
+      if (role === 'SUBSTITUTE') {
+        await removeAutoAdminIfEnabled(matchId, session.userId)
+      }
+    } else {
+      await sql`
+        INSERT INTO match_participants (match_id, user_id, role)
+        VALUES (${matchId}, ${session.userId}, ${role}::participant_role)
+      `
     }
 
     if (role === 'PLAYER') {
+      await addAutoAdminForOfficialPlayer(matchId, session.userId)
       await autoBalanceTeamsIfFull(matchId)
       await sendMatchFilledPushIfNeeded(matchId)
+    } else {
+      await notifyNewEligibleSubstitutes(matchId, previousEligibleIds)
     }
 
     revalidatePath(`/dashboard/partido/${matchId}`)
@@ -285,13 +394,21 @@ export async function leaveMatch(matchId: number) {
   }
 
   try {
+    const beforePolicy = await getRosterPolicy(matchId)
+    const previousEligibleIds = beforePolicy?.eligibleSubstituteIds ?? []
+
     // Send notification BEFORE removing participant so other participants can be queried
     await sendPlayerLeftPush(matchId, session.userId)
+    await sql`
+      DELETE FROM match_admins
+      WHERE match_id = ${matchId} AND user_id = ${session.userId}
+    `
 
     await sql`
       DELETE FROM match_participants 
       WHERE match_id = ${matchId} AND user_id = ${session.userId}
     `
+    await notifyNewEligibleSubstitutes(matchId, previousEligibleIds)
 
     // Check remaining participants
     const remaining = await sql`
@@ -318,30 +435,25 @@ export async function removeParticipant(matchId: number, participantId: number) 
     return { error: 'No autenticado' }
   }
 
-  // Admins can remove anyone.
-  // Additionally: the inviter (even if not admin) can remove only their guest participants.
-  const isAdmin = await isMatchAdmin(matchId)
-
   try {
-    const participant = await sql`
-      SELECT user_id, invited_by_user_id
-      FROM match_participants
-      WHERE match_id = ${matchId} AND id = ${participantId}
-    `
-    if (participant.length === 0) {
+    const participant = await getParticipantForAction(matchId, participantId)
+    if (!participant) {
       return { error: 'Jugador no encontrado' }
     }
 
-    const userId = participant[0]?.user_id as number | null | undefined
-    const invitedByUserId = participant[0]?.invited_by_user_id as number | null | undefined
+    const userId = participant.user_id
+    const invitedByUserId = participant.invited_by_user_id
 
-    const canRemoveAsInviter = !isAdmin && userId === null && invitedByUserId === session.userId
-    if (!isAdmin && !canRemoveAsInviter) {
+    const canRemoveAsInviter = userId === null && invitedByUserId === session.userId
+    const canRemoveAsRosterManager = await canManageRoster(matchId, session.userId)
+    if (!canRemoveAsRosterManager && !canRemoveAsInviter) {
       return { error: 'Solo los administradores pueden quitar jugadores' }
     }
 
-    // Only registered users can be match admins
-    if (userId !== null && userId !== undefined) {
+    const beforePolicy = await getRosterPolicy(matchId)
+    const previousEligibleIds = beforePolicy?.eligibleSubstituteIds ?? []
+
+    if (userId !== null) {
       await sql`
         DELETE FROM match_admins
         WHERE match_id = ${matchId} AND user_id = ${userId}
@@ -351,6 +463,8 @@ export async function removeParticipant(matchId: number, participantId: number) 
       DELETE FROM match_participants
       WHERE match_id = ${matchId} AND id = ${participantId}
     `
+    await notifyNewEligibleSubstitutes(matchId, previousEligibleIds)
+
     revalidatePath(`/dashboard/partido/${matchId}`)
     revalidatePath('/dashboard')
     return { success: true }
@@ -393,14 +507,7 @@ export async function assignTeam(matchId: number, participantId: number, team: '
     return { error: 'No autenticado' }
   }
 
-  // Check if user is admin or creator
-  const match = await sql`SELECT created_by_user_id FROM matches WHERE id = ${matchId}`
-  const adminCheck = await sql`SELECT 1 FROM match_admins WHERE match_id = ${matchId} AND user_id = ${session.userId}`
-  
-  const isCreator = match.length > 0 && match[0].created_by_user_id === session.userId
-  const isAdmin = adminCheck.length > 0
-
-  if (!isCreator && !isAdmin) {
+  if (!(await canManageRoster(matchId, session.userId))) {
     return { error: 'Solo los administradores pueden armar equipos' }
   }
 
@@ -431,14 +538,9 @@ export async function randomizeTeams(matchId: number) {
     return { error: 'No autenticado' }
   }
 
-  // Check if user is admin or creator
   const match = await sql`SELECT created_by_user_id, team_count FROM matches WHERE id = ${matchId}`
-  const adminCheck = await sql`SELECT 1 FROM match_admins WHERE match_id = ${matchId} AND user_id = ${session.userId}`
-  
-  const isCreator = match.length > 0 && match[0].created_by_user_id === session.userId
-  const isAdmin = adminCheck.length > 0
 
-  if (!isCreator && !isAdmin) {
+  if (!(await canManageRoster(matchId, session.userId))) {
     return { error: 'Solo los administradores pueden armar equipos' }
   }
   
@@ -549,7 +651,12 @@ export async function randomizeTeams(matchId: number) {
   }
 }
 
-export async function invitePlayer(matchId: number, userId: number, role: 'PLAYER' | 'SUBSTITUTE' = 'PLAYER') {
+export async function invitePlayer(
+  matchId: number,
+  userId: number,
+  role: 'PLAYER' | 'SUBSTITUTE' = 'PLAYER',
+  overrideSubstitutePriority = false
+) {
   const session = await getSession()
   if (!session) {
     return { error: 'No autenticado' }
@@ -587,31 +694,25 @@ export async function invitePlayer(matchId: number, userId: number, role: 'PLAYE
       }
     }
 
-    // Enforce capacity for PLAYER invites (same rule as joining).
+    const policy = await getRosterPolicy(matchId)
+    if (!policy) {
+      return { error: 'Partido no encontrado' }
+    }
+    if (role === 'PLAYER') {
+      const canOverridePriority = overrideSubstitutePriority && await canManageRoster(matchId, session.userId)
+      if (!policy.canNewPlayerJoin) {
+        if (!canOverridePriority || policy.freeSlots <= 0) {
+          return { error: 'Hay suplentes con prioridad para ocupar el cupo' }
+        }
+      }
+      if (policy.freeSlots <= 0) {
+        return { error: 'El partido ya está lleno' }
+      }
+    }
+
     const inserted = await sql`
-      WITH match_data AS (
-        SELECT
-          CASE
-            WHEN team_count > 0 THEN GREATEST(1, team_count) * GREATEST(1, team_size)
-            ELSE max_players
-          END AS max_players
-        FROM matches
-        WHERE id = ${matchId}
-      ),
-      player_count AS (
-        SELECT COUNT(*)::int AS count
-        FROM match_participants
-        WHERE match_id = ${matchId}
-          AND role = 'PLAYER'
-      )
       INSERT INTO match_participants (match_id, user_id, role, invited_by_user_id)
-      SELECT ${matchId}, ${userId}, ${role}::participant_role, ${session.userId}
-      FROM match_data md, player_count pc
-      WHERE (
-        ${role}::text <> 'PLAYER'
-        OR md.max_players <= 0
-        OR pc.count < md.max_players
-      )
+      VALUES (${matchId}, ${userId}, ${role}::participant_role, ${session.userId})
       RETURNING id
     `
 
@@ -619,6 +720,7 @@ export async function invitePlayer(matchId: number, userId: number, role: 'PLAYE
       return { error: 'El partido ya está lleno' }
     }
     if (role === 'PLAYER') {
+      await addAutoAdminForOfficialPlayer(matchId, userId)
       await autoBalanceTeamsIfFull(matchId)
       await sendMatchFilledPushIfNeeded(matchId)
     }
@@ -642,7 +744,7 @@ export type InviteGuestInput = {
   role: 'PLAYER' | 'SUBSTITUTE'
 }
 
-export async function inviteGuest(matchId: number, input: InviteGuestInput) {
+export async function inviteGuest(matchId: number, input: InviteGuestInput, overrideSubstitutePriority = false) {
   const session = await getSession()
   if (!session) {
     return { error: 'No autenticado' }
@@ -681,23 +783,23 @@ export async function inviteGuest(matchId: number, input: InviteGuestInput) {
       }
     }
 
-    // Enforce capacity for PLAYER guests
+    const policy = await getRosterPolicy(matchId)
+    if (!policy) {
+      return { error: 'Partido no encontrado' }
+    }
+    if (role === 'PLAYER') {
+      const canOverridePriority = overrideSubstitutePriority && await canManageRoster(matchId, session.userId)
+      if (!policy.canNewPlayerJoin) {
+        if (!canOverridePriority || policy.freeSlots <= 0) {
+          return { error: 'Hay suplentes con prioridad para ocupar el cupo' }
+        }
+      }
+      if (policy.freeSlots <= 0) {
+        return { error: 'El partido ya está lleno' }
+      }
+    }
+
     const inserted = await sql`
-      WITH match_data AS (
-        SELECT
-          CASE
-            WHEN team_count > 0 THEN GREATEST(1, team_count) * GREATEST(1, team_size)
-            ELSE max_players
-          END AS max_players
-        FROM matches
-        WHERE id = ${matchId}
-      ),
-      player_count AS (
-        SELECT COUNT(*)::int AS count
-        FROM match_participants
-        WHERE match_id = ${matchId}
-          AND role = 'PLAYER'
-      )
       INSERT INTO match_participants (
         match_id,
         user_id,
@@ -707,7 +809,7 @@ export async function inviteGuest(matchId: number, input: InviteGuestInput) {
         guest_gender,
         role
       )
-      SELECT
+      VALUES (
         ${matchId},
         NULL,
         ${session.userId},
@@ -715,11 +817,6 @@ export async function inviteGuest(matchId: number, input: InviteGuestInput) {
         ${phoneLastFour || null},
         ${gender}::user_gender,
         ${role}::participant_role
-      FROM match_data md, player_count pc
-      WHERE (
-        ${role}::text <> 'PLAYER'
-        OR md.max_players <= 0
-        OR pc.count < md.max_players
       )
       RETURNING id
     `
@@ -963,19 +1060,32 @@ export async function resetTeamsToSubstitutes(matchId: number) {
     return { error: 'No autenticado' }
   }
 
-  const isAdmin = await isMatchAdmin(matchId)
-  if (!isAdmin) {
+  if (!(await canManageRoster(matchId, session.userId))) {
     return { error: 'Solo los administradores pueden modificar el partido' }
   }
 
   try {
+    const beforePolicy = await getRosterPolicy(matchId)
+    const previousEligibleIds = beforePolicy?.eligibleSubstituteIds ?? []
+
     await sql`
       UPDATE match_participants 
       SET role = 'SUBSTITUTE', team = NULL, team_number = NULL
       WHERE match_id = ${matchId}
     `
+    if (await getMatchAutoAdmin(matchId)) {
+      await sql`
+        DELETE FROM match_admins
+        WHERE match_id = ${matchId}
+          AND user_id <> (
+            SELECT created_by_user_id FROM matches WHERE id = ${matchId}
+          )
+      `
+    }
+    await notifyNewEligibleSubstitutes(matchId, previousEligibleIds)
     revalidatePath(`/dashboard/partido/${matchId}`)
     revalidatePath('/dashboard')
+    return { success: true }
   } catch (error) {
     console.error('Error resetting teams:', error)
     return { error: 'Error al resetear equipos' }
@@ -1091,68 +1201,159 @@ export async function getMatchAdmins(matchId: number) {
 }
 
 // Change participant role (promote sub to player, demote player to sub)
-export async function changeParticipantRole(matchId: number, participantId: number, newRole: 'PLAYER' | 'SUBSTITUTE') {
+export async function changeParticipantRole(
+  matchId: number,
+  participantId: number,
+  newRole: 'PLAYER' | 'SUBSTITUTE',
+  overrideSubstitutePriority = false
+) {
   const session = await getSession()
   if (!session) {
     return { error: 'No autenticado' }
   }
 
-  const admin = await isMatchAdmin(matchId)
-  if (!admin) {
+  if (!(await canManageRoster(matchId, session.userId))) {
     return { error: 'Solo los administradores pueden mover jugadores' }
   }
 
   try {
-    // Enforce capacity when promoting to PLAYER.
-    const updated = await sql`
-      WITH target AS (
-        SELECT user_id, role
-        FROM match_participants
-        WHERE id = ${participantId} AND match_id = ${matchId}
-      ),
-      match_data AS (
-        SELECT
-          CASE
-            WHEN team_count > 0 THEN GREATEST(1, team_count) * GREATEST(1, team_size)
-            ELSE max_players
-          END AS max_players
-        FROM matches
-        WHERE id = ${matchId}
-      ),
-      player_count AS (
-        SELECT COUNT(*)::int AS count
-        FROM match_participants mp
-        JOIN target t ON true
-        WHERE mp.match_id = ${matchId}
-          AND mp.role = 'PLAYER'
-          AND mp.id <> ${participantId}
-      )
-      UPDATE match_participants mp
+    const participant = await getParticipantForAction(matchId, participantId)
+    if (!participant) {
+      return { error: 'Jugador no encontrado' }
+    }
+
+    const beforePolicy = await getRosterPolicy(matchId)
+    if (!beforePolicy) {
+      return { error: 'Partido no encontrado' }
+    }
+
+    if (newRole === 'PLAYER' && participant.role !== 'PLAYER') {
+      const isEligibleSub = beforePolicy.eligibleSubstituteIds.includes(participantId)
+      if (!isEligibleSub && !beforePolicy.canNewPlayerJoin) {
+        if (!overrideSubstitutePriority || beforePolicy.freeSlots <= 0) {
+          return { error: 'Hay suplentes con prioridad para ocupar el cupo' }
+        }
+      }
+      if (!isEligibleSub && beforePolicy.freeSlots <= 0) {
+        return { error: 'El partido ya está lleno' }
+      }
+    }
+
+    await sql`
+      UPDATE match_participants
       SET role = ${newRole}::participant_role,
           team = NULL,
           team_number = NULL
-      FROM target t, match_data md, player_count pc
-      WHERE mp.id = ${participantId} AND mp.match_id = ${matchId}
-        AND (
-          ${newRole}::text <> 'PLAYER'
-          OR t.role = 'PLAYER'
-          OR md.max_players <= 0
-          OR pc.count < md.max_players
-        )
-      RETURNING mp.id
+      WHERE id = ${participantId} AND match_id = ${matchId}
     `
-    if (updated.length === 0 && newRole === 'PLAYER') {
-      return { error: 'El partido ya está lleno' }
-    }
+
     if (newRole === 'PLAYER') {
+      await addAutoAdminForOfficialPlayer(matchId, participant.user_id)
       await autoBalanceTeamsIfFull(matchId)
       await sendMatchFilledPushIfNeeded(matchId)
+    } else {
+      await removeAutoAdminIfEnabled(matchId, participant.user_id)
+      await notifyNewEligibleSubstitutes(matchId, beforePolicy.eligibleSubstituteIds)
     }
     revalidatePath(`/dashboard/partido/${matchId}`)
     return { success: true }
   } catch (error) {
     console.error('Error changing role:', error)
     return { error: 'Error al cambiar rol' }
+  }
+}
+
+export async function confirmEligibleSubstitute(matchId: number, participantId: number) {
+  const session = await getSession()
+  if (!session) {
+    return { error: 'No autenticado' }
+  }
+
+  try {
+    const participant = await getParticipantForAction(matchId, participantId)
+    if (!participant) {
+      return { error: 'Suplente no encontrado' }
+    }
+    if (participant.role !== 'SUBSTITUTE') {
+      return { error: 'Este jugador ya no está como suplente' }
+    }
+
+    const canActAsSelf = participant.user_id === session.userId
+    const canActAsInviter = participant.user_id === null && participant.invited_by_user_id === session.userId
+    const canActAsRosterManager = await canManageRoster(matchId, session.userId)
+    if (!canActAsSelf && !canActAsInviter && !canActAsRosterManager) {
+      return { error: 'No tenes permiso para confirmar este suplente' }
+    }
+
+    const policy = await getRosterPolicy(matchId)
+    if (!policy) {
+      return { error: 'Partido no encontrado' }
+    }
+    if (!policy.eligibleSubstituteIds.includes(participantId)) {
+      return { error: 'Todavía no es el turno de este suplente' }
+    }
+
+    await sql`
+      UPDATE match_participants
+      SET role = 'PLAYER', team = NULL, team_number = NULL
+      WHERE id = ${participantId} AND match_id = ${matchId} AND role = 'SUBSTITUTE'
+    `
+    await addAutoAdminForOfficialPlayer(matchId, participant.user_id)
+    await autoBalanceTeamsIfFull(matchId)
+    await sendMatchFilledPushIfNeeded(matchId)
+
+    revalidatePath(`/dashboard/partido/${matchId}`)
+    revalidatePath('/dashboard')
+    return { success: true }
+  } catch (error) {
+    console.error('Error confirming eligible substitute:', error)
+    return { error: 'Error al confirmar suplente' }
+  }
+}
+
+export async function passEligibleSubstitute(matchId: number, participantId: number) {
+  const session = await getSession()
+  if (!session) {
+    return { error: 'No autenticado' }
+  }
+
+  try {
+    const participant = await getParticipantForAction(matchId, participantId)
+    if (!participant) {
+      return { error: 'Suplente no encontrado' }
+    }
+    if (participant.role !== 'SUBSTITUTE') {
+      return { error: 'Este jugador ya no está como suplente' }
+    }
+
+    const canActAsSelf = participant.user_id === session.userId
+    const canActAsInviter = participant.user_id === null && participant.invited_by_user_id === session.userId
+    const canActAsRosterManager = await canManageRoster(matchId, session.userId)
+    if (!canActAsSelf && !canActAsInviter && !canActAsRosterManager) {
+      return { error: 'No tenes permiso para pasar este suplente' }
+    }
+
+    const policy = await getRosterPolicy(matchId)
+    if (!policy) {
+      return { error: 'Partido no encontrado' }
+    }
+    if (!policy.eligibleSubstituteIds.includes(participantId)) {
+      return { error: 'Todavía no es el turno de este suplente' }
+    }
+
+    await removeAutoAdminIfEnabled(matchId, participant.user_id)
+    await sql`
+      DELETE FROM match_participants
+      WHERE id = ${participantId} AND match_id = ${matchId} AND role = 'SUBSTITUTE'
+    `
+    await notifyNewEligibleSubstitutes(matchId, policy.eligibleSubstituteIds)
+
+    revalidatePath(`/dashboard/partido/${matchId}`)
+    revalidatePath('/dashboard')
+    return { success: true }
+  } catch (error) {
+    console.error('Error passing eligible substitute:', error)
+    return { error: 'Error al pasar suplente' }
   }
 }
 
@@ -1177,8 +1378,7 @@ export async function assignTeamNumber(matchId: number, participantId: number, t
     return { error: 'No autenticado' }
   }
 
-  const isAdmin = await isMatchAdmin(matchId)
-  if (!isAdmin) {
+  if (!(await canManageRoster(matchId, session.userId))) {
     return { error: 'Solo los administradores pueden armar equipos' }
   }
 

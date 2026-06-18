@@ -30,12 +30,14 @@ vi.mock('@/lib/db', () => {
 import {
   buildParticipantNamesSummary,
   getPushErrorStatusCode,
+  shouldSendPushNotifications,
   sendPushToSubscriptions,
   sendNewMatchPush,
   sendMatchCancelledPush,
   sendPlayerLeftPush,
   sendMatchFilledPushIfNeeded,
   sendMatchChangesPush,
+  sendEligibleSubstitutesPush,
 } from './push'
 
 function resetState() {
@@ -43,6 +45,8 @@ function resetState() {
   for (const key of Object.keys(_sqlState.results)) {
     delete _sqlState.results[key]
   }
+  process.env.VERCEL_ENV = 'production'
+  process.env.VERCEL_GIT_COMMIT_REF = 'main'
 }
 
 describe('getPushErrorStatusCode', () => {
@@ -90,6 +94,27 @@ describe('buildParticipantNamesSummary', () => {
   })
 })
 
+describe('shouldSendPushNotifications', () => {
+  beforeEach(() => {
+    resetState()
+  })
+
+  it('allows push only from the main production deployment', () => {
+    expect(shouldSendPushNotifications()).toBe(true)
+
+    process.env.VERCEL_ENV = 'preview'
+    expect(shouldSendPushNotifications()).toBe(false)
+
+    process.env.VERCEL_ENV = 'production'
+    process.env.VERCEL_GIT_COMMIT_REF = 'feature-branch'
+    expect(shouldSendPushNotifications()).toBe(false)
+
+    delete process.env.VERCEL_ENV
+    process.env.VERCEL_GIT_COMMIT_REF = 'main'
+    expect(shouldSendPushNotifications()).toBe(false)
+  })
+})
+
 describe('sendPushToSubscriptions', () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -118,6 +143,21 @@ describe('sendPushToSubscriptions', () => {
     process.env.VAPID_PRIVATE_KEY = 'test-private'
     const webpush = (await import('web-push')).default
     await sendPushToSubscriptions([], { title: 'Test', body: 'Test body' })
+    expect(webpush.sendNotification).not.toHaveBeenCalled()
+  })
+
+  it('does not send notifications from non-main deployments', async () => {
+    process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY = 'test-public'
+    process.env.VAPID_PRIVATE_KEY = 'test-private'
+    process.env.VERCEL_ENV = 'preview'
+    process.env.VERCEL_GIT_COMMIT_REF = 'feature-branch'
+
+    const webpush = (await import('web-push')).default
+    await sendPushToSubscriptions(
+      [{ endpoint: 'https://push.example.com/sub1', p256dh: 'key1', auth: 'auth1' }],
+      { title: 'Test', body: 'Hello' }
+    )
+
     expect(webpush.sendNotification).not.toHaveBeenCalled()
   })
 
@@ -303,5 +343,44 @@ describe('sendMatchChangesPush', () => {
     const payload = JSON.parse(vi.mocked(webpush.sendNotification).mock.calls[0][1] as string)
     expect(payload.title).toBe('Cambios en el partido')
     expect(payload.body).toContain('Partido de Test')
+  })
+})
+
+describe('sendEligibleSubstitutesPush', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    resetState()
+    process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY = 'test-public'
+    process.env.VAPID_PRIVATE_KEY = 'test-private'
+  })
+
+  it('sends confirmation notification directly to eligible substitute subscriptions', async () => {
+    _sqlState.results['FROM matches WHERE id'] = [{ title: 'Partido FIFO' }]
+    _sqlState.results["mp.role = 'SUBSTITUTE'"] = [
+      { endpoint: 'https://push.example.com/sub1', p256dh: 'k1', auth: 'a1' },
+    ]
+
+    const webpush = (await import('web-push')).default
+    await sendEligibleSubstitutesPush(9, [20, 21])
+
+    const subCall = _sqlState.calls.find(c => c.query.includes("mp.role = 'SUBSTITUTE'"))
+    expect(subCall).toBeDefined()
+    expect(subCall!.values).toContain(9)
+    expect(subCall!.values).toContainEqual([20, 21])
+    expect(subCall!.query).not.toContain('push_notifications_settings')
+
+    expect(webpush.sendNotification).toHaveBeenCalledTimes(1)
+    const payload = JSON.parse(vi.mocked(webpush.sendNotification).mock.calls[0][1] as string)
+    expect(payload.title).toBe('Te toca confirmar')
+    expect(payload.body).toContain('Partido FIFO')
+    expect(payload.url).toBe('/dashboard/partido/9')
+  })
+
+  it('does nothing with no eligible participant ids', async () => {
+    const webpush = (await import('web-push')).default
+    await sendEligibleSubstitutesPush(9, [])
+
+    expect(_sqlState.calls).toHaveLength(0)
+    expect(webpush.sendNotification).not.toHaveBeenCalled()
   })
 })

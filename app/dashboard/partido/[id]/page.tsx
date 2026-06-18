@@ -18,6 +18,7 @@ interface Match {
   max_players: number
   invites_per_player: number | null
   field_rent_total: number | null
+  auto_admin_registered_players: boolean
 }
 
 interface Participant {
@@ -59,6 +60,7 @@ async function getMatch(id: number): Promise<Match | null> {
       m.max_players,
       m.invites_per_player,
       m.field_rent_total,
+      COALESCE(m.auto_admin_registered_players, false) AS auto_admin_registered_players,
       trim(initcap(u.name) || ' ' || initcap(u.last_name)) as creator_name
     FROM matches m
     JOIN users u ON m.created_by_user_id = u.id
