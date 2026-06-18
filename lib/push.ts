@@ -103,6 +103,29 @@ export async function sendMatchChangesPush(matchId: number): Promise<void> {
   })
 }
 
+export async function sendEligibleSubstitutesPush(matchId: number, participantIds: number[]): Promise<void> {
+  if (participantIds.length === 0) return
+
+  const matchRows = await sql`SELECT title FROM matches WHERE id = ${matchId}`
+  const matchTitle = String(matchRows[0]?.title || 'Partido')
+
+  const subscriptions = await sql`
+    SELECT DISTINCT ps.endpoint, ps.p256dh, ps.auth
+    FROM match_participants mp
+    JOIN push_subscriptions ps ON ps.user_id = mp.user_id
+    WHERE mp.match_id = ${matchId}
+      AND mp.id = ANY(${participantIds}::int[])
+      AND mp.user_id IS NOT NULL
+      AND mp.role = 'SUBSTITUTE'
+  `
+
+  await sendPushToSubscriptions(subscriptions as PushSubscriptionRow[], {
+    title: 'Te toca confirmar',
+    body: `Hay un cupo libre en ${matchTitle}. Confirmá si querés pasar a jugador.`,
+    url: `/dashboard/partido/${matchId}`,
+  })
+}
+
 export async function sendNewMatchPush(matchId: number, matchTitle: string, creatorUserId: number): Promise<void> {
   // Notify all users who have new_match enabled, EXCEPT the creator
   const subscriptions = await sql`

@@ -51,6 +51,7 @@ export default function NuevoPartidoPage() {
   const [customMaxPlayers, setCustomMaxPlayers] = useState('')
   const [useCustomMaxPlayers, setUseCustomMaxPlayers] = useState(false)
   const [invitesPerPlayer, setInvitesPerPlayer] = useState<number | null>(null) // null = unlimited
+  const [autoAdminRegisteredPlayers, setAutoAdminRegisteredPlayers] = useState(false)
   const [userName, setUserName] = useState('')
   const [weekOffset, setWeekOffset] = useState(0) // 0 = this week, 1 = next week, etc.
   const router = useRouter()
@@ -112,6 +113,7 @@ export default function NuevoPartidoPage() {
       ? computedMaxPlayers(actualTeamCount, finalTeamSize)
       : (useCustomMaxPlayers && customMaxPlayers ? parseInt(customMaxPlayers) : maxPlayers)
     formData.set('maxPlayers', finalMaxPlayers.toString())
+    formData.set('autoAdminRegisteredPlayers', autoAdminRegisteredPlayers.toString())
     if (invitesPerPlayer !== null) {
       formData.set('invitesPerPlayer', invitesPerPlayer.toString())
     }
@@ -571,6 +573,39 @@ export default function NuevoPartidoPage() {
                   ? 'Cada jugador puede invitar sin restricciones' 
                   : `Cada jugador puede invitar hasta ${invitesPerPlayer} persona(s)`}
               </p>
+            </div>
+
+            {/* Auto-admin official registered players */}
+            <div className="flex flex-col gap-3">
+              <Label className="flex items-center gap-2">
+                <Users className="w-4 h-4 text-primary" />
+                Administradores automaticos
+              </Label>
+              <div
+                role="button"
+                tabIndex={0}
+                onClick={() => setAutoAdminRegisteredPlayers(prev => !prev)}
+                onKeyDown={(e) => e.key === 'Enter' && setAutoAdminRegisteredPlayers(prev => !prev)}
+                className={`flex items-center justify-between p-3 rounded-lg border-2 transition-all text-left cursor-pointer ${
+                  autoAdminRegisteredPlayers ? 'border-primary bg-primary/10' : 'border-border hover:border-muted-foreground/50'
+                }`}
+              >
+                <div className="flex flex-col gap-0.5">
+                  <span className="font-medium text-sm">
+                    Hacer administradores a los jugadores registrados
+                  </span>
+                  <span className="text-xs text-muted-foreground">
+                    Solo jugadores oficiales registrados. Los suplentes no reciben permisos.
+                  </span>
+                </div>
+                <div onClick={(e) => e.stopPropagation()}>
+                  <Switch
+                    checked={autoAdminRegisteredPlayers}
+                    onCheckedChange={setAutoAdminRegisteredPlayers}
+                    aria-label="Administradores automaticos"
+                  />
+                </div>
+              </div>
             </div>
 
             {/* Visibility toggle */}

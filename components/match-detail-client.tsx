@@ -28,6 +28,8 @@ import {
   Wallet,
   UserRoundPlus,
   UserRoundMinus,
+  Check,
+  X,
 } from 'lucide-react'
 import { GenderIcon, type Gender } from '@/lib/gender'
 import {
@@ -46,6 +48,8 @@ import {
   setParticipantPaymentStatus,
   updateMatchFieldRentTotal,
   updateParticipantPaymentNotes,
+  confirmEligibleSubstitute,
+  passEligibleSubstitute,
 } from '@/app/actions/matches'
 import { TeamAssignment } from '@/components/team-assignment'
 import { SoccerField } from '@/components/soccer-field'
@@ -88,6 +92,7 @@ interface Match {
   max_players: number
   invites_per_player: number | null
   field_rent_total: number | null
+  auto_admin_registered_players: boolean
 }
 
 interface Participant {
@@ -278,6 +283,18 @@ export function MatchDetailClient({
 
   const players = effectiveParticipants.filter(p => p.role === 'PLAYER')
   const substitutes = effectiveParticipants.filter(p => p.role === 'SUBSTITUTE')
+  const freeOfficialSlots = maxPlayers > 0 ? Math.max(0, maxPlayers - players.length) : Number.POSITIVE_INFINITY
+  const eligibleSubstitutes = Number.isFinite(freeOfficialSlots)
+    ? substitutes.slice(0, freeOfficialSlots)
+    : substitutes
+  const eligibleSubstituteIds = new Set(eligibleSubstitutes.map(p => p.id))
+  const currentUserIsOfficialPlayer = players.some(p => p.user_id === currentUserId)
+  const canManageRoster = isCreator || (isAdmin && currentUserIsOfficialPlayer)
+  const playerJoinReservedForSubs = maxPlayers > 0 && freeOfficialSlots <= substitutes.length && substitutes.length > 0
+  const canJoinAsOfficialPlayer = maxPlayers <= 0 || (freeOfficialSlots > 0 && !playerJoinReservedForSubs)
+  const currentUserIsEligibleSubstitute = userParticipation
+    ? eligibleSubstituteIds.has(userParticipation.id)
+    : false
 
   const { playerCount, substituteCount } = getParticipantCountsFromRoster(effectiveParticipants)
 
@@ -548,6 +565,44 @@ export function MatchDetailClient({
     setLoading(null)
   }
 
+  async function handleConfirmEligibleSubstitute(participantId: number) {
+    setLoadingParticipantIds(prev => {
+      const next = new Set(prev)
+      next.add(participantId)
+      return next
+    })
+    const result = await confirmEligibleSubstitute(match.id, participantId)
+    setLoadingParticipantIds(prev => {
+      const next = new Set(prev)
+      next.delete(participantId)
+      return next
+    })
+    if (result?.error) {
+      showError('Error al intentar confirmar suplente', result.error)
+    } else {
+      router.refresh()
+    }
+  }
+
+  async function handlePassEligibleSubstitute(participantId: number) {
+    setLoadingParticipantIds(prev => {
+      const next = new Set(prev)
+      next.add(participantId)
+      return next
+    })
+    const result = await passEligibleSubstitute(match.id, participantId)
+    setLoadingParticipantIds(prev => {
+      const next = new Set(prev)
+      next.delete(participantId)
+      return next
+    })
+    if (result?.error) {
+      showError('Error al intentar pasar turno', result.error)
+    } else {
+      router.refresh()
+    }
+  }
+
   function handleLeaveClick() {
     setShowLeaveConfirm(true)
   }
@@ -769,6 +824,10 @@ export function MatchDetailClient({
 
   async function handleSaveParticipantChanges() {
     if (!selectedParticipant) return
+    if (!canManageRoster) {
+      showError('No tenes permiso para mover jugadores')
+      return
+    }
     const participantId = selectedParticipant.id
     const userId = selectedParticipant.user_id
     const isCreatorUser = userId === match.created_by_user_id
@@ -940,6 +999,11 @@ export function MatchDetailClient({
   }
 
   const isLoading = loading !== null
+  const canEditSelectedParticipant = Boolean(selectedParticipant) && canManageRoster && !isPast
+  const canKickSelectedParticipant = Boolean(selectedParticipant) && !isPast && (
+    (canManageRoster && selectedParticipant?.user_id !== match.created_by_user_id) ||
+    (Boolean(selectedParticipant?.is_guest) && selectedParticipant?.invited_by_user_id === currentUserId)
+  )
 
   return (
     <div className="flex flex-col gap-4 pb-8">
@@ -1403,7 +1467,7 @@ export function MatchDetailClient({
               <div className="flex flex-wrap gap-2">
                 <Button
                   onClick={() => handleJoin('PLAYER')}
-                  disabled={isLoading}
+                  disabled={isLoading || !canJoinAsOfficialPlayer}
                   className="gap-2"
                 >
                   {loading === 'join-PLAYER' ? (
@@ -1424,6 +1488,41 @@ export function MatchDetailClient({
                     <UserRoundPlus className="w-4 h-4" />
                   )}
                   Anotarme como suplente
+                </Button>
+              </div>
+              {!canJoinAsOfficialPlayer ? (
+                <p className="text-xs text-muted-foreground">
+                  {playerJoinReservedForSubs
+                    ? 'Los cupos libres estan reservados para suplentes por orden de anotacion.'
+                    : 'El partido ya esta completo. Podes anotarte como suplente.'}
+                </p>
+              ) : null}
+            </div>
+          )}
+
+          {!isPast && userParticipation?.role === 'SUBSTITUTE' && currentUserIsEligibleSubstitute && (
+            <div className="flex flex-col gap-2 rounded-lg border border-amber-500/60 bg-amber-500/10 p-3">
+              <p className="text-sm font-medium text-foreground">Hay un cupo para vos como jugador.</p>
+              <p className="text-xs text-muted-foreground">Confirmá si querés pasar a la lista oficial o pasá el turno.</p>
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  size="sm"
+                  className="gap-2"
+                  disabled={loadingParticipantIds.has(userParticipation.id)}
+                  onClick={() => handleConfirmEligibleSubstitute(userParticipation.id)}
+                >
+                  {loadingParticipantIds.has(userParticipation.id) ? <InlineLoader size="sm" /> : <Check className="w-4 h-4" />}
+                  Confirmar
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="gap-2"
+                  disabled={loadingParticipantIds.has(userParticipation.id)}
+                  onClick={() => handlePassEligibleSubstitute(userParticipation.id)}
+                >
+                  <X className="w-4 h-4" />
+                  Pasar
                 </Button>
               </div>
             </div>
@@ -1479,6 +1578,7 @@ export function MatchDetailClient({
               participants={players}
               substitutes={substitutes}
               isAdmin={isAdmin}
+              canManageRoster={canManageRoster}
               isPast={isPast}
               onAssignTeam={handleAssignTeam}
               onAssignTeamNumber={handleAssignTeamNumber}
@@ -1491,6 +1591,10 @@ export function MatchDetailClient({
               admins={admins}
               matchCreatorId={match.created_by_user_id}
               loadingParticipantIds={loadingParticipantIds}
+              eligibleSubstituteIds={eligibleSubstituteIds}
+              currentUserId={currentUserId}
+              onConfirmEligibleSubstitute={handleConfirmEligibleSubstitute}
+              onPassEligibleSubstitute={handlePassEligibleSubstitute}
             />
           </div>
 
@@ -1850,7 +1954,7 @@ export function MatchDetailClient({
                         ? 'Administrador'
                         : 'Miembro'}
                   </span>
-                  {isAdmin && selectedParticipant.user_id !== match.created_by_user_id && (
+                  {canEditSelectedParticipant && selectedParticipant.user_id !== null && selectedParticipant.user_id !== match.created_by_user_id && (
                     <Button
                       type="button"
                       variant="outline"
@@ -1875,7 +1979,7 @@ export function MatchDetailClient({
                         const raw = e.target.value
                         setEditTeamNumber(raw === '' ? null : Number.parseInt(raw, 10))
                       }}
-                      disabled={editRole === 'SUBSTITUTE'}
+                      disabled={!canEditSelectedParticipant || editRole === 'SUBSTITUTE'}
                       className="h-9 px-2 rounded-md border border-border bg-background text-foreground text-sm disabled:opacity-60"
                     >
                       <option value="">Sin equipo</option>
@@ -1896,6 +2000,7 @@ export function MatchDetailClient({
                       variant={editRole === 'PLAYER' ? 'default' : 'outline'}
                       size="sm"
                       onClick={() => setEditRole('PLAYER')}
+                      disabled={!canEditSelectedParticipant}
                     >
                       Jugador
                     </Button>
@@ -1907,6 +2012,7 @@ export function MatchDetailClient({
                         setEditRole('SUBSTITUTE')
                         setEditTeamNumber(null)
                       }}
+                      disabled={!canEditSelectedParticipant}
                     >
                       Suplente
                     </Button>
@@ -1919,11 +2025,7 @@ export function MatchDetailClient({
 
           <DialogFooter>
             <div className="flex flex-col gap-2 sm:flex-row sm:justify-end">
-              {(isAdmin && selectedParticipant?.user_id !== match.created_by_user_id) || (
-                !isPast &&
-                Boolean(selectedParticipant?.is_guest) &&
-                selectedParticipant?.invited_by_user_id === currentUserId
-              ) ? (
+              {canKickSelectedParticipant ? (
                 <Button
                   type="button"
                   variant="destructive"
@@ -1940,6 +2042,7 @@ export function MatchDetailClient({
                 type="button"
                 onClick={handleSaveParticipantChanges}
                 disabled={(() => {
+                  if (!canEditSelectedParticipant) return true
                   if (!selectedParticipant || !initialEditState) return true
                   const changed =
                     editRole !== initialEditState.role ||

@@ -95,6 +95,7 @@ export async function initializeDatabase() {
       max_players INTEGER DEFAULT 10,
       invites_per_player INTEGER,
       field_rent_total INTEGER,
+      auto_admin_registered_players BOOLEAN DEFAULT false,
       created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
     )
   `
@@ -143,6 +144,7 @@ export async function initializeDatabase() {
     await sql`ALTER TABLE match_participants ADD COLUMN IF NOT EXISTS team_number INTEGER`
     await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS admin BOOLEAN DEFAULT false`
     await sql`ALTER TABLE matches ADD COLUMN IF NOT EXISTS field_rent_total INTEGER`
+    await sql`ALTER TABLE matches ADD COLUMN IF NOT EXISTS auto_admin_registered_players BOOLEAN DEFAULT false`
     await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS pixel_avatar TEXT`
   } catch {
     // Columns might already exist

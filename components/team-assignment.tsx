@@ -15,7 +15,7 @@ import {
 } from '@dnd-kit/core'
 import { Badge } from '@/components/ui/badge'
 import { cn } from '@/lib/utils'
-import { Shield } from 'lucide-react'
+import { Check, Shield, X } from 'lucide-react'
 import { InlineLoader } from '@/components/football-loader'
 import { GenderIcon, type Gender } from '@/lib/gender'
 
@@ -29,6 +29,7 @@ interface Participant {
   team: 'A' | 'B' | null
   team_number?: number | null
   is_guest?: boolean
+  invited_by_user_id?: number | null
   invited_by_name?: string | null
 }
 
@@ -42,6 +43,7 @@ interface TeamAssignmentProps {
   participants: Participant[]
   substitutes: Participant[]
   isAdmin: boolean
+  canManageRoster?: boolean
   isPast: boolean
   onAssignTeam: (participantId: number, team: 'A' | 'B' | null) => void
   onPromoteToPlayer?: (participantId: number) => void
@@ -52,8 +54,12 @@ interface TeamAssignmentProps {
   admins?: Admin[]
   matchCreatorId?: number
   loadingParticipantIds?: Set<number>
+  eligibleSubstituteIds?: Set<number>
+  currentUserId?: number
   onAssignTeamNumber?: (participantId: number, teamNumber: number | null) => void
   onSelectParticipant?: (participantId: number) => void
+  onConfirmEligibleSubstitute?: (participantId: number) => void
+  onPassEligibleSubstitute?: (participantId: number) => void
 }
 
 const TEAM_COLORS = [
@@ -71,6 +77,7 @@ export function TeamAssignment({
   participants,
   substitutes,
   isAdmin,
+  canManageRoster = isAdmin,
   isPast,
   onAssignTeam,
   onPromoteToPlayer,
@@ -81,12 +88,18 @@ export function TeamAssignment({
   admins = [],
   matchCreatorId,
   loadingParticipantIds = new Set(),
+  eligibleSubstituteIds = new Set(),
+  currentUserId,
   onAssignTeamNumber,
   onSelectParticipant,
+  onConfirmEligibleSubstitute,
+  onPassEligibleSubstitute,
 }: TeamAssignmentProps) {
   const [activeDrag, setActiveDrag] = useState<Participant | null>(null)
 
-  const canDrag = isAdmin && !isPast
+  const canDrag = canManageRoster && !isPast
+  const eligibleSubstitutes = substitutes.filter(p => eligibleSubstituteIds.has(p.id))
+  const waitingSubstitutes = substitutes.filter(p => !eligibleSubstituteIds.has(p.id))
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
@@ -213,6 +226,12 @@ export function TeamAssignment({
     const isLoading = loadingParticipantIds.has(participant.id)
     const isCreator = participant.user_id !== null && participant.user_id === matchCreatorId
     const colors = teamIndex !== null ? TEAM_COLORS[teamIndex % TEAM_COLORS.length] : null
+    const isEligibleSubstitute = isSub && eligibleSubstituteIds.has(participant.id)
+    const canActOnEligibleSubstitute = isEligibleSubstitute && !isPast && (
+      canManageRoster ||
+      participant.user_id === currentUserId ||
+      (participant.user_id === null && participant.invited_by_user_id === currentUserId)
+    )
     const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
       id: participant.id,
       data: { participantId: participant.id, fromSubs: isSub },
@@ -261,14 +280,44 @@ export function TeamAssignment({
               </span>
             ) : null}
           </span>
-          <span className="text-muted-foreground text-[10px] md:text-[10px] flex items-center gap-1">
-            ({participant.phone_last_four ? participant.phone_last_four : '—'})
-            {isCreator ? (
-              <Shield className="w-3 h-3 text-amber-400 shrink-0" />
-            ) : isPlayerAdmin ? (
-              <Shield className="w-3 h-3 text-sky-400 shrink-0" />
+          <div className="flex items-center gap-1 self-stretch md:self-auto">
+            <span className="text-muted-foreground text-[10px] md:text-[10px] flex items-center gap-1">
+              ({participant.phone_last_four ? participant.phone_last_four : '—'})
+              {isCreator ? (
+                <Shield className="w-3 h-3 text-amber-400 shrink-0" />
+              ) : isPlayerAdmin ? (
+                <Shield className="w-3 h-3 text-sky-400 shrink-0" />
+              ) : null}
+            </span>
+            {canActOnEligibleSubstitute ? (
+              <span className="ml-auto inline-flex items-center gap-1">
+                <button
+                  type="button"
+                  aria-label={`Confirmar a ${participant.name} como jugador`}
+                  disabled={isLoading}
+                  onClick={(event) => {
+                    event.stopPropagation()
+                    onConfirmEligibleSubstitute?.(participant.id)
+                  }}
+                  className="rounded-full border border-emerald-500/60 bg-emerald-500/10 p-1 text-emerald-600 hover:bg-emerald-500/20 disabled:opacity-50"
+                >
+                  <Check className="w-3 h-3" />
+                </button>
+                <button
+                  type="button"
+                  aria-label={`Pasar turno de ${participant.name}`}
+                  disabled={isLoading}
+                  onClick={(event) => {
+                    event.stopPropagation()
+                    onPassEligibleSubstitute?.(participant.id)
+                  }}
+                  className="rounded-full border border-destructive/60 bg-destructive/10 p-1 text-destructive hover:bg-destructive/20 disabled:opacity-50"
+                >
+                  <X className="w-3 h-3" />
+                </button>
+              </span>
             ) : null}
-          </span>
+          </div>
         </Badge>
       </div>
     )
@@ -349,6 +398,29 @@ export function TeamAssignment({
     )
   }
 
+  function renderSubstitutesList() {
+    return (
+      <DropZone zone="substitutes">
+        <div className="flex flex-col gap-1 p-0 md:p-1">
+          {eligibleSubstitutes.length > 0 ? (
+            <div className="rounded-lg border-2 border-amber-500/70 bg-amber-500/10 p-1.5">
+              <p className="px-1 pb-1 text-xs font-medium text-amber-700 dark:text-amber-300">
+                Suplentes habilitados para confirmar
+              </p>
+              {renderPlayerList(eligibleSubstitutes, null, true)}
+            </div>
+          ) : null}
+          {waitingSubstitutes.length > 0 ? renderPlayerList(waitingSubstitutes, null, true) : null}
+          {substitutes.length === 0 ? (
+            <p className="text-xs text-muted-foreground p-2">
+              {canDrag ? 'Arrastra jugadores aqui' : 'Sin jugadores'}
+            </p>
+          ) : null}
+        </div>
+      </DropZone>
+    )
+  }
+
   function renderNumberedList(list: Participant[], totalSlots: number, teamIndex: number | null) {
     return (
       <div className="flex flex-col gap-0.5 p-0 md:gap-1.5 md:p-1">
@@ -392,9 +464,7 @@ export function TeamAssignment({
             <h4 className="text-sm font-medium text-muted-foreground">
               Suplentes ({substitutes.length})
             </h4>
-            <DropZone zone="substitutes">
-              {renderPlayerList(substitutes, null, true)}
-            </DropZone>
+            {renderSubstitutesList()}
           </div>
         </div>
       )
@@ -441,9 +511,7 @@ export function TeamAssignment({
           {/* Substitutes */}
           <div className="flex flex-col gap-0 md:gap-2">
             <h4 className="text-sm font-medium text-muted-foreground">Suplentes ({substitutes.length})</h4>
-            <DropZone zone="substitutes">
-              {renderPlayerList(substitutes, null, true)}
-            </DropZone>
+            {renderSubstitutesList()}
           </div>
 
         </div>
@@ -488,9 +556,7 @@ export function TeamAssignment({
         {/* Substitutes */}
         <div className="flex flex-col gap-0 md:gap-2">
           <h4 className="text-sm font-medium text-muted-foreground">Suplentes ({substitutes.length})</h4>
-          <DropZone zone="substitutes">
-            {renderPlayerList(substitutes, null, true)}
-          </DropZone>
+          {renderSubstitutesList()}
         </div>
 
       </div>
