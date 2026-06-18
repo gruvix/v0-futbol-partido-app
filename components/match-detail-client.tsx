@@ -51,6 +51,7 @@ import { InvitePlayersDialog } from '@/components/invite-players-dialog'
 import { InlineLoader, useActionLoader } from '@/components/football-loader'
 import { EditableField } from '@/components/editable-field'
 import { useErrorToast } from '@/components/error-toast-provider'
+import { waitForNextPaint } from '@/lib/wait-for-next-paint'
 import {
   Dialog,
   DialogContent,
@@ -174,10 +175,13 @@ export function MatchDetailClient({
 
   async function handleFieldSave(field: string, value: string | number | boolean | null): Promise<void> {
     showLoader('Guardando...')
+    await waitForNextPaint()
     const result = await updateMatchField(match.id, field, value)
     hideLoader()
     if (result?.error) {
       showError('Error al intentar actualizar configuracion del partido')
+    } else {
+      router.refresh()
     }
   }
 
@@ -367,6 +371,7 @@ export function MatchDetailClient({
     }
 
     showLoader('Guardando...')
+    await waitForNextPaint()
     await applyTeamSettings(nextTeamCount, nextTeamSize, nextMaxPlayers)
     hideLoader()
     // Force refresh so UI immediately reflects new mode (teams vs no teams)
@@ -386,10 +391,13 @@ export function MatchDetailClient({
     setLoading(`join-${role}`)
     const roleLabels: Record<'PLAYER' | 'SUBSTITUTE', string> = { PLAYER: 'Jugador', SUBSTITUTE: 'Suplente' }
     showLoader(`Anotandote como ${roleLabels[role]}...`)
+    await waitForNextPaint()
     const result = await joinMatch(match.id, role)
     hideLoader()
     if (result?.error) {
       showError('Error al intentar anotarte', result.error)
+    } else {
+      router.refresh()
     }
     setLoading(null)
   }
@@ -400,6 +408,7 @@ export function MatchDetailClient({
       next.add(participantId)
       return next
     })
+    await waitForNextPaint()
     const result = await confirmEligibleSubstitute(match.id, participantId)
     setLoadingParticipantIds(prev => {
       const next = new Set(prev)
@@ -419,6 +428,7 @@ export function MatchDetailClient({
       next.add(participantId)
       return next
     })
+    await waitForNextPaint()
     const result = await passEligibleSubstitute(match.id, participantId)
     setLoadingParticipantIds(prev => {
       const next = new Set(prev)
@@ -440,6 +450,7 @@ export function MatchDetailClient({
     setShowLeaveConfirm(false)
     setLoading('leave')
     showLoader('Abandonando partido...')
+    await waitForNextPaint()
     const result = await leaveMatch(match.id)
     hideLoader()
     if (result?.error) {
@@ -450,12 +461,14 @@ export function MatchDetailClient({
       setShowLastPlayerConfirm(true)
     } else {
       setLoading(null)
+      router.refresh()
     }
   }
 
   async function handleDelete() {
     setLoading('delete')
     showLoader('Eliminando partido...')
+    await waitForNextPaint()
     const result = await deleteMatch(match.id)
     if (result?.error) {
       showError('Error al intentar eliminar partido', result.error)
@@ -469,10 +482,13 @@ export function MatchDetailClient({
   async function handleRandomize() {
     setLoading('randomize')
     showLoader('Sorteando equipos...')
+    await waitForNextPaint()
     const result = await randomizeTeams(match.id)
     hideLoader()
     if (result?.error) {
       showError('Error al intentar sortear equipos', result.error)
+    } else {
+      router.refresh()
     }
     setLoading(null)
   }
@@ -494,6 +510,7 @@ export function MatchDetailClient({
       next.add(participantId)
       return next
     })
+    await waitForNextPaint()
 
     const result = await assignTeam(match.id, participantId, team)
 
@@ -512,6 +529,8 @@ export function MatchDetailClient({
         return next
       })
       showError('Error al intentar mover jugador a equipo', result.error)
+    } else {
+      router.refresh()
     }
     // On success, keep the override - it will be consistent with the revalidated data
     // and will be cleaned up when participants prop changes
@@ -533,6 +552,7 @@ export function MatchDetailClient({
       next.add(participantId)
       return next
     })
+    await waitForNextPaint()
 
     const result = await assignTeamNumber(match.id, participantId, teamNumber)
 
@@ -549,6 +569,8 @@ export function MatchDetailClient({
         return next
       })
       showError('Error al intentar mover jugador a equipo', result.error)
+    } else {
+      router.refresh()
     }
   }
 
@@ -559,6 +581,7 @@ export function MatchDetailClient({
       next.add(participantId)
       return next
     })
+    await waitForNextPaint()
     const result = await changeParticipantRole(match.id, participantId, 'PLAYER')
     setLoadingParticipantIds(prev => {
       const next = new Set(prev)
@@ -572,6 +595,8 @@ export function MatchDetailClient({
         return next
       })
       showError('Error al intentar mover jugador a jugadores', result.error)
+    } else {
+      router.refresh()
     }
   }
 
@@ -582,6 +607,7 @@ export function MatchDetailClient({
       next.add(participantId)
       return next
     })
+    await waitForNextPaint()
     const result = await changeParticipantRole(match.id, participantId, 'SUBSTITUTE')
     setLoadingParticipantIds(prev => {
       const next = new Set(prev)
@@ -595,6 +621,8 @@ export function MatchDetailClient({
         return next
       })
       showError('Error al intentar mover jugador a suplentes', result.error)
+    } else {
+      router.refresh()
     }
   }
 
@@ -642,10 +670,13 @@ export function MatchDetailClient({
   async function confirmKickParticipant() {
     if (!showKickConfirm) return
     const participantId = showKickConfirm.id
+    await waitForNextPaint()
     const result = await removeParticipant(match.id, participantId)
     setKickLoadingId(null)
     if (result?.error) {
       showError('Error al intentar quitar jugador', result.error)
+    } else {
+      router.refresh()
     }
     setShowKickConfirm(null)
     closeParticipantPanel()
@@ -666,6 +697,7 @@ export function MatchDetailClient({
       next.add(participantId)
       return next
     })
+    await waitForNextPaint()
 
     const nextTeamNumber = editRole === 'SUBSTITUTE' ? null : editTeamNumber
 
@@ -805,6 +837,7 @@ export function MatchDetailClient({
   async function confirmTeamReset() {
     if (!showTeamResetWarning) return
     showLoader('Guardando...')
+    await waitForNextPaint()
 
     // New behavior: keep everyone as PLAYER/SUBSTITUTE but clear team assignments.
     const normalize = await resetTeamsToNoTeam(match.id)
@@ -1001,11 +1034,15 @@ export function MatchDetailClient({
                 }
                 canEdit={isAdmin && !isPast}
                 onSave={async () => {
+                  showLoader('Guardando...')
+                  await waitForNextPaint()
                   await updateMatchField(match.id, 'location_type', editLocationType)
                   if (editLocationType === 'OTRO') {
                     await updateMatchField(match.id, 'location_custom', editLocationCustom)
                   }
                   await updateMatchField(match.id, 'field', editField || null)
+                  hideLoader()
+                  router.refresh()
                 }}
                 renderEditor={() => (
                   <div className="flex flex-col gap-3">

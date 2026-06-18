@@ -2,9 +2,11 @@
 
 import { useEffect, useState } from 'react'
 import { Check, Search, UserPlus } from 'lucide-react'
+import { useRouter } from 'next/navigation'
 
 import { getAllUsers, getInviteCount, inviteGuest, invitePlayer, type InviteGuestInput } from '@/app/actions/matches'
 import { GenderIcon, type Gender } from '@/lib/gender'
+import { waitForNextPaint } from '@/lib/wait-for-next-paint'
 import { useErrorToast } from '@/components/error-toast-provider'
 import { InlineLoader, useActionLoader } from '@/components/football-loader'
 import { Button } from '@/components/ui/button'
@@ -45,6 +47,7 @@ export function InvitePlayersDialog({
   canInviteAsPlayer,
   playerInviteDisabledReason,
 }: InvitePlayersDialogProps): React.JSX.Element {
+  const router = useRouter()
   const { showError } = useErrorToast()
   const { showLoader, hideLoader } = useActionLoader()
 
@@ -139,6 +142,7 @@ export function InvitePlayersDialog({
     setFeedback(null)
     const roleLabel = role === 'PLAYER' ? 'jugador' : 'suplente'
     showLoader(`Invitando ${roleLabel}...`)
+    await waitForNextPaint()
     const result = await invitePlayer(matchId, userId, role) as any
     hideLoader()
 
@@ -153,6 +157,7 @@ export function InvitePlayersDialog({
     setInvitedIds(prev => [...prev, userId])
     setFeedback({ type: 'success', message: `Jugador invitado como ${role === 'PLAYER' ? 'jugador' : 'suplente'}.` })
     setInvitingId(null)
+    router.refresh()
   }
 
   async function handleInviteGuest(): Promise<void> {
@@ -174,6 +179,7 @@ export function InvitePlayersDialog({
     setGuestSubmitting(true)
     setFeedback(null)
     showLoader('Agregando invitado...')
+    await waitForNextPaint()
     const result = await inviteGuest(matchId, {
       name,
       phoneLastFour: guestLastFour.trim() || undefined,
@@ -203,6 +209,7 @@ export function InvitePlayersDialog({
     setSearch('')
     setInvitedGuestNames(prev => [...prev, name])
     setFeedback({ type: 'success', message: `${name} fue invitado como ${guestRole === 'PLAYER' ? 'jugador' : 'suplente'}.` })
+    router.refresh()
 
     if (hasLimit) {
       const r = await getInviteCount(matchId, currentUserId)
