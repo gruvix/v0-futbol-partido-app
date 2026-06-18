@@ -11,7 +11,13 @@ export function getPushErrorStatusCode(error: unknown): number | null {
   return typeof statusCode === 'number' ? statusCode : null
 }
 
+export function shouldSendPushNotifications(): boolean {
+  return process.env.VERCEL_ENV === 'production' && process.env.VERCEL_GIT_COMMIT_REF === 'main'
+}
+
 export async function sendPushToSubscriptions(subscriptions: PushSubscriptionRow[], payload: { title: string; body: string; url?: string }) {
+  if (!shouldSendPushNotifications()) return
+
   const vapidPublicKey = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY
   const vapidPrivateKey = process.env.VAPID_PRIVATE_KEY
   if (!vapidPublicKey || !vapidPrivateKey || subscriptions.length === 0) return

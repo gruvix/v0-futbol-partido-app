@@ -4,7 +4,6 @@ import { useEffect, useState } from 'react'
 import { Check, Search, UserPlus } from 'lucide-react'
 
 import { getAllUsers, getInviteCount, inviteGuest, invitePlayer, type InviteGuestInput } from '@/app/actions/matches'
-import { toast } from 'sonner'
 import { GenderIcon, type Gender } from '@/lib/gender'
 import { useErrorToast } from '@/components/error-toast-provider'
 import { InlineLoader, useActionLoader } from '@/components/football-loader'
@@ -32,6 +31,8 @@ interface InvitePlayersDialogProps {
   currentParticipantIds: number[]
   invitesPerPlayer?: number | null
   currentUserId: number
+  canInviteAsPlayer: boolean
+  playerInviteDisabledReason?: string
 }
 
 export function InvitePlayersDialog({
@@ -41,6 +42,8 @@ export function InvitePlayersDialog({
   currentParticipantIds,
   invitesPerPlayer,
   currentUserId,
+  canInviteAsPlayer,
+  playerInviteDisabledReason,
 }: InvitePlayersDialogProps): React.JSX.Element {
   const { showError } = useErrorToast()
   const { showLoader, hideLoader } = useActionLoader()
@@ -52,6 +55,7 @@ export function InvitePlayersDialog({
   const [search, setSearch] = useState('')
   const [myInviteCount, setMyInviteCount] = useState(0)
   const [showGuestForm, setShowGuestForm] = useState(false)
+  const [feedback, setFeedback] = useState<{ type: 'error' | 'success'; message: string } | null>(null)
 
   // Guest invite form
   const [guestName, setGuestName] = useState('')
@@ -65,6 +69,8 @@ export function InvitePlayersDialog({
   const hasLimit = invitesPerPlayer !== null && invitesPerPlayer !== undefined
   const remainingInvites = hasLimit ? invitesPerPlayer - (myInviteCount + invitedIds.length) : Infinity
   const reachedLimit = hasLimit && remainingInvites <= 0
+  const isPlayerInviteDisabled = !canInviteAsPlayer
+  const playerInviteReason = playerInviteDisabledReason || 'Los cupos de jugador estan reservados para suplentes por orden de anotacion.'
 
   useEffect(() => {
     if (!open) return
@@ -76,6 +82,7 @@ export function InvitePlayersDialog({
     setGuestLastFour('')
     setGuestGender('MALE')
     setGuestRole('PLAYER')
+    setFeedback(null)
     // reset duplicate tracking for each dialog session
     setInvitedGuestNames([])
 
@@ -104,14 +111,39 @@ export function InvitePlayersDialog({
     return value.replace(/\D+/g, '')
   }
 
-  async function handleInvite(userId: number): Promise<void> {
+  function getErrorMessage(error: unknown, fallback: string): string {
+    if (!error) return fallback
+    if (typeof error === 'string') return error
+    if (typeof error === 'object' && 'message' in error && typeof (error as { message?: unknown }).message === 'string') {
+      return (error as { message: string }).message
+    }
+    return fallback
+  }
+
+  function cancelGuestForm(): void {
+    setShowGuestForm(false)
+    setGuestName('')
+    setGuestLastFour('')
+    setGuestGender('MALE')
+    setGuestRole('PLAYER')
+    setFeedback(null)
+  }
+
+  async function handleInvite(userId: number, role: 'PLAYER' | 'SUBSTITUTE'): Promise<void> {
+    if (role === 'PLAYER' && isPlayerInviteDisabled) {
+      setFeedback({ type: 'error', message: playerInviteReason })
+      return
+    }
+
     setInvitingId(userId)
-    showLoader('Invitando jugador...')
-    const result = await invitePlayer(matchId, userId, 'PLAYER') as any
+    setFeedback(null)
+    const roleLabel = role === 'PLAYER' ? 'jugador' : 'suplente'
+    showLoader(`Invitando ${roleLabel}...`)
+    const result = await invitePlayer(matchId, userId, role) as any
     hideLoader()
 
     if (result?.error) {
-      showError('Error al intentar invitar jugador', result.error)
+      setFeedback({ type: 'error', message: getErrorMessage(result.error, 'Error al intentar invitar jugador') })
       setInvitingId(null)
       return
     }
@@ -119,22 +151,28 @@ export function InvitePlayersDialog({
     // successful invite: clear search and reset form state
     setSearch('')
     setInvitedIds(prev => [...prev, userId])
+    setFeedback({ type: 'success', message: `Jugador invitado como ${role === 'PLAYER' ? 'jugador' : 'suplente'}.` })
     setInvitingId(null)
   }
 
   async function handleInviteGuest(): Promise<void> {
     const name = guestName.trim()
     if (!name) {
-      showError('Nombre requerido', 'Ingresá un nombre para el invitado')
+      setFeedback({ type: 'error', message: 'Ingresá un nombre para el invitado' })
       return
     }
     // Prevent duplicate non‑registered invites by name before sending request
     if (invitedGuestNames.includes(name)) {
-      toast.error('Ya existe un invitado con ese nombre')
+      setFeedback({ type: 'error', message: 'Ya existe un invitado con ese nombre' })
+      return
+    }
+    if (guestRole === 'PLAYER' && isPlayerInviteDisabled) {
+      setFeedback({ type: 'error', message: playerInviteReason })
       return
     }
 
     setGuestSubmitting(true)
+    setFeedback(null)
     showLoader('Agregando invitado...')
     const result = await inviteGuest(matchId, {
       name,
@@ -146,22 +184,15 @@ export function InvitePlayersDialog({
     setGuestSubmitting(false)
 
     if ((result as any)?.error) {
-      // Show error toast; result.error may be a string or an object with message
-      const description = typeof result.error === 'object' && result.error !== null && 'message' in result.error
-        ? (result.error as any).message
-        : String(result.error)
-      toast.error('Error al intentar invitar', { description })
+      setFeedback({ type: 'error', message: getErrorMessage(result.error, 'Error al intentar invitar') })
       return
     }
 
     // Prevent duplicate non‑registered invites by name
     if (invitedGuestNames.includes(name)) {
-      toast.error('Ya existe un invitado con ese nombre')
+      setFeedback({ type: 'error', message: 'Ya existe un invitado con ese nombre' })
       return
     }
-
-    // Show success toast
-    toast.success('Invitado agregado')
 
     // Reset form, hide guest form, clear search and refresh invite count (limit display)
     setGuestName('')
@@ -171,6 +202,7 @@ export function InvitePlayersDialog({
     setShowGuestForm(false)
     setSearch('')
     setInvitedGuestNames(prev => [...prev, name])
+    setFeedback({ type: 'success', message: `${name} fue invitado como ${guestRole === 'PLAYER' ? 'jugador' : 'suplente'}.` })
 
     if (hasLimit) {
       const r = await getInviteCount(matchId, currentUserId)
@@ -187,6 +219,7 @@ export function InvitePlayersDialog({
   const handleStartGuestInvite = () => {
     setGuestName(search)
     setShowGuestForm(true)
+    setFeedback(null)
   }
 
   return (
@@ -201,65 +234,113 @@ export function InvitePlayersDialog({
           </DialogDescription>
         </DialogHeader>
 
-        <div className="relative">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-          <Input
-            placeholder="Buscar por nombre o numero..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className="pl-10"
-          />
-        </div>
+        {feedback ? (
+          <div
+            className={`rounded-lg border p-3 text-sm ${
+              feedback.type === 'error'
+                ? 'border-destructive/60 bg-destructive/10 text-destructive'
+                : 'border-emerald-500/60 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300'
+            }`}
+          >
+            {feedback.message}
+          </div>
+        ) : null}
 
-        <div className="flex-1 overflow-y-auto min-h-0 -mx-6 px-6">
-          {loadingUsers ? (
-            <div className="flex items-center justify-center py-8">
-              <InlineLoader />
-            </div>
-          ) : (
-            <div className="flex flex-col gap-2 py-2">
-              {filteredUsers.map((user) => {
-                const isInviting = invitingId === user.id
-                const isInvited = invitedIds.includes(user.id)
-                return (
-                  <div
-                    key={user.id}
-                    className="flex items-center justify-between p-3 rounded-lg border border-border hover:bg-muted/50 transition-colors"
-                  >
-                    <div>
-                      <p className="font-medium text-foreground inline-flex items-center gap-1">
-                        <GenderIcon gender={user.gender} className="w-4 h-4 shrink-0" />
-                        <span>{user.name}</span>
-                      </p>
-                      <p className="text-sm text-muted-foreground">****{user.phone_last_four}</p>
-                    </div>
-                    <Button
-                      size="sm"
-                      variant={isInvited ? 'secondary' : 'default'}
-                      onClick={() => void handleInvite(user.id)}
-                      disabled={isInviting || isInvited || reachedLimit}
-                      className="gap-2"
+        {isPlayerInviteDisabled ? (
+          <div className="rounded-lg border border-destructive/60 bg-destructive/10 p-3 text-sm text-destructive">
+            {playerInviteReason}
+          </div>
+        ) : null}
+
+        {!showGuestForm ? (
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+            <Input
+              placeholder="Buscar por nombre o numero..."
+              value={search}
+              onChange={(e) => {
+                setSearch(e.target.value)
+                setFeedback(null)
+              }}
+              className="pl-10"
+            />
+          </div>
+        ) : null}
+
+        {!showGuestForm ? (
+          <div className="flex-1 overflow-y-auto min-h-0 -mx-6 px-6">
+            {loadingUsers ? (
+              <div className="flex items-center justify-center py-8">
+                <InlineLoader />
+              </div>
+            ) : (
+              <div className="flex flex-col gap-2 py-2">
+                {filteredUsers.map((user) => {
+                  const isInviting = invitingId === user.id
+                  const isInvited = invitedIds.includes(user.id)
+                  return (
+                    <div
+                      key={user.id}
+                      className="flex items-center justify-between gap-3 p-3 rounded-lg border border-border hover:bg-muted/50 transition-colors"
                     >
-                      {isInviting ? (
-                        <InlineLoader size="sm" />
-                      ) : isInvited ? (
-                        <>
-                          <Check className="w-4 h-4" />
-                          Invitado
-                        </>
-                      ) : (
-                        <>
-                          <UserPlus className="w-4 h-4" />
-                          Invitar
-                        </>
-                      )}
-                    </Button>
-                  </div>
-                )
-              })}
-            </div>
-          )}
-        </div>
+                      <div className="min-w-0">
+                        <p className="font-medium text-foreground inline-flex items-center gap-1">
+                          <GenderIcon gender={user.gender} className="w-4 h-4 shrink-0" />
+                          <span className="truncate">{user.name}</span>
+                        </p>
+                        <p className="text-sm text-muted-foreground">****{user.phone_last_four}</p>
+                      </div>
+                      <div className="flex flex-col gap-1 sm:flex-row">
+                        <Button
+                          size="sm"
+                          variant={isInvited ? 'secondary' : 'default'}
+                          onClick={() => void handleInvite(user.id, 'PLAYER')}
+                          disabled={isInviting || isInvited || reachedLimit || isPlayerInviteDisabled}
+                          className="gap-2"
+                        >
+                          {isInviting ? (
+                            <InlineLoader size="sm" />
+                          ) : isInvited ? (
+                            <>
+                              <Check className="w-4 h-4" />
+                              Invitado
+                            </>
+                          ) : (
+                            <>
+                              <UserPlus className="w-4 h-4" />
+                              Jugador
+                            </>
+                          )}
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant={isInvited ? 'secondary' : 'outline'}
+                          onClick={() => void handleInvite(user.id, 'SUBSTITUTE')}
+                          disabled={isInviting || isInvited || reachedLimit}
+                          className="gap-2"
+                        >
+                          {isInviting ? (
+                            <InlineLoader size="sm" />
+                          ) : isInvited ? (
+                            <>
+                              <Check className="w-4 h-4" />
+                              Invitado
+                            </>
+                          ) : (
+                            <>
+                              <UserPlus className="w-4 h-4" />
+                              Suplente
+                            </>
+                          )}
+                        </Button>
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+          </div>
+        ) : null}
 
         <div className="flex flex-col gap-2 pt-4 border-t border-border -mx-6 px-6 bg-background">
           {!showGuestForm ? (
@@ -341,7 +422,7 @@ export function InvitePlayersDialog({
                       variant="ghost"
                       size="sm"
                       className="flex-1"
-                      onClick={() => setShowGuestForm(false)}
+                      onClick={cancelGuestForm}
                       disabled={guestSubmitting}
                     >
                       Cancelar
@@ -350,7 +431,7 @@ export function InvitePlayersDialog({
                       size="sm"
                       className="flex-1"
                       onClick={() => void handleInviteGuest()}
-                      disabled={guestSubmitting || reachedLimit}
+                      disabled={guestSubmitting || reachedLimit || (guestRole === 'PLAYER' && isPlayerInviteDisabled)}
                     >
                       {guestSubmitting ? <InlineLoader size="sm" /> : 'Invitar'}
                     </Button>

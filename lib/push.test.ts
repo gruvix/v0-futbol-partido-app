@@ -30,6 +30,7 @@ vi.mock('@/lib/db', () => {
 import {
   buildParticipantNamesSummary,
   getPushErrorStatusCode,
+  shouldSendPushNotifications,
   sendPushToSubscriptions,
   sendNewMatchPush,
   sendMatchCancelledPush,
@@ -44,6 +45,8 @@ function resetState() {
   for (const key of Object.keys(_sqlState.results)) {
     delete _sqlState.results[key]
   }
+  process.env.VERCEL_ENV = 'production'
+  process.env.VERCEL_GIT_COMMIT_REF = 'main'
 }
 
 describe('getPushErrorStatusCode', () => {
@@ -91,6 +94,27 @@ describe('buildParticipantNamesSummary', () => {
   })
 })
 
+describe('shouldSendPushNotifications', () => {
+  beforeEach(() => {
+    resetState()
+  })
+
+  it('allows push only from the main production deployment', () => {
+    expect(shouldSendPushNotifications()).toBe(true)
+
+    process.env.VERCEL_ENV = 'preview'
+    expect(shouldSendPushNotifications()).toBe(false)
+
+    process.env.VERCEL_ENV = 'production'
+    process.env.VERCEL_GIT_COMMIT_REF = 'feature-branch'
+    expect(shouldSendPushNotifications()).toBe(false)
+
+    delete process.env.VERCEL_ENV
+    process.env.VERCEL_GIT_COMMIT_REF = 'main'
+    expect(shouldSendPushNotifications()).toBe(false)
+  })
+})
+
 describe('sendPushToSubscriptions', () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -119,6 +143,21 @@ describe('sendPushToSubscriptions', () => {
     process.env.VAPID_PRIVATE_KEY = 'test-private'
     const webpush = (await import('web-push')).default
     await sendPushToSubscriptions([], { title: 'Test', body: 'Test body' })
+    expect(webpush.sendNotification).not.toHaveBeenCalled()
+  })
+
+  it('does not send notifications from non-main deployments', async () => {
+    process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY = 'test-public'
+    process.env.VAPID_PRIVATE_KEY = 'test-private'
+    process.env.VERCEL_ENV = 'preview'
+    process.env.VERCEL_GIT_COMMIT_REF = 'feature-branch'
+
+    const webpush = (await import('web-push')).default
+    await sendPushToSubscriptions(
+      [{ endpoint: 'https://push.example.com/sub1', p256dh: 'key1', auth: 'auth1' }],
+      { title: 'Test', body: 'Hello' }
+    )
+
     expect(webpush.sendNotification).not.toHaveBeenCalled()
   })
 

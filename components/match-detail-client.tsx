@@ -1808,6 +1808,12 @@ export function MatchDetailClient({
         currentParticipantIds={participants.flatMap(p => (p.user_id === null ? [] : [p.user_id]))}
         invitesPerPlayer={match.invites_per_player}
         currentUserId={currentUserId}
+        canInviteAsPlayer={canJoinAsOfficialPlayer}
+        playerInviteDisabledReason={
+          playerJoinReservedForSubs
+            ? 'Los cupos libres estan reservados para suplentes por orden de anotacion.'
+            : 'El partido ya esta completo. Podes invitar como suplente.'
+        }
       />
 
       {/* Delete Confirmation Dialog */}
