@@ -194,3 +194,81 @@
 .animate-football-shadow {
   animation: football-shadow 0.6s ease-in-out infinite;
 }
+
+@keyframes shake-horizontal {
+  0%, 100% {
+    transform: translateX(0);
+  }
+  15% {
+    transform: translateX(-8px);
+  }
+  30% {
+    transform: translateX(8px);
+  }
+  45% {
+    transform: translateX(-6px);
+  }
+  60% {
+    transform: translateX(6px);
+  }
+  75% {
+    transform: translateX(-3px);
+  }
+  90% {
+    transform: translateX(0);
+  }
+}
+
+.animate-join-player-denial-shake {
+  animation: shake-horizontal 0.5s ease-in-out;
+  display: inline-flex;
+}
+
+@keyframes join-player-warning-text-denial {
+  0% {
+    color: var(--destructive);
+    transform: scale(1);
+    animation-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
+  }
+  4% {
+    color: var(--destructive);
+    transform: scale(1.1);
+    animation-timing-function: cubic-bezier(0.16, 1, 0.3, 1);
+  }
+  35% {
+    color: var(--destructive);
+    transform: scale(1);
+    animation-timing-function: ease-in;
+  }
+  55% {
+    color: var(--destructive);
+    transform: scale(1);
+    animation-timing-function: ease-in;
+  }
+  100% {
+    color: var(--muted-foreground);
+    transform: scale(1);
+  }
+}
+
+@keyframes join-player-warning-button-denial {
+  0%, 55% {
+    background-color: var(--destructive);
+    color: var(--destructive-foreground);
+  }
+  100% {
+    background-color: var(--primary);
+    color: var(--primary-foreground);
+  }
+}
+
+.animate-join-player-warning-text-denial {
+  animation: join-player-warning-text-denial 4s forwards;
+  display: inline-block;
+  transform-origin: left center;
+}
+
+.animate-join-player-warning-button-denial {
+  animation: join-player-warning-button-denial 4s ease-in forwards;
+  transition: none !important;
+}

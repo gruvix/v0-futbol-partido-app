@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
@@ -52,6 +52,7 @@ import { InlineLoader, useActionLoader } from '@/components/football-loader'
 import { EditableField } from '@/components/editable-field'
 import { useErrorToast } from '@/components/error-toast-provider'
 import { waitForNextPaint } from '@/lib/wait-for-next-paint'
+import { cn } from '@/lib/utils'
 import {
   Dialog,
   DialogContent,
@@ -149,6 +150,35 @@ export function MatchDetailClient({
   currentUserId,
 }: MatchDetailClientProps) {
   const [loading, setLoading] = useState<string | null>(null)
+  const [joinPlayerDenialAnimKey, setJoinPlayerDenialAnimKey] = useState(0)
+  const joinPlayerDenialResetTimeoutRef = useRef<number | null>(null)
+
+  const JOIN_PLAYER_DENIAL_ANIMATION_MS = 5000
+
+  useEffect(() => {
+    return () => {
+      if (joinPlayerDenialResetTimeoutRef.current !== null) {
+        window.clearTimeout(joinPlayerDenialResetTimeoutRef.current)
+      }
+    }
+  }, [])
+
+  function triggerJoinPlayerDenialFeedback() {
+    if (joinPlayerDenialResetTimeoutRef.current !== null) {
+      window.clearTimeout(joinPlayerDenialResetTimeoutRef.current)
+    }
+
+    setJoinPlayerDenialAnimKey(0)
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        setJoinPlayerDenialAnimKey(Date.now())
+        joinPlayerDenialResetTimeoutRef.current = window.setTimeout(() => {
+          setJoinPlayerDenialAnimKey(0)
+          joinPlayerDenialResetTimeoutRef.current = null
+        }, JOIN_PLAYER_DENIAL_ANIMATION_MS)
+      })
+    })
+  }
   const [showInviteDialog, setShowInviteDialog] = useState(false)
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
   const [showLastPlayerConfirm, setShowLastPlayerConfirm] = useState(false)
@@ -389,6 +419,11 @@ export function MatchDetailClient({
   const canEditGoBack = editWeekOffset > 0
 
   async function handleJoin(role: 'PLAYER' | 'SUBSTITUTE') {
+    if (role === 'PLAYER' && playerJoinReservedForSubs) {
+      triggerJoinPlayerDenialFeedback()
+      return
+    }
+
     setLoading(`join-${role}`)
     const roleLabels: Record<'PLAYER' | 'SUBSTITUTE', string> = { PLAYER: 'Jugador', SUBSTITUTE: 'Suplente' }
     showLoader(`Anotandote como ${roleLabels[role]}...`)
@@ -1360,18 +1395,28 @@ export function MatchDetailClient({
             <div className="flex flex-col gap-2">
               {/* errors are shown via ErrorToastProvider */}
               <div className="flex flex-wrap gap-2">
-                <Button
-                  onClick={() => handleJoin('PLAYER')}
-                  disabled={isLoading || !canJoinAsOfficialPlayer}
-                  className="gap-2"
-                >
-                  {loading === 'join-PLAYER' ? (
-                    <InlineLoader size="sm" />
-                  ) : (
-                    <UserRoundPlus className="w-4 h-4" />
+                <span
+                  key={joinPlayerDenialAnimKey > 0 ? `join-player-shake-${joinPlayerDenialAnimKey}` : 'join-player-shake-idle'}
+                  className={cn(
+                    joinPlayerDenialAnimKey > 0 && 'animate-join-player-denial-shake'
                   )}
-                  Anotarme como jugador
-                </Button>
+                >
+                  <Button
+                    onClick={() => handleJoin('PLAYER')}
+                    disabled={isLoading || (!playerJoinReservedForSubs && !canJoinAsOfficialPlayer)}
+                    className={cn(
+                      'gap-2',
+                      joinPlayerDenialAnimKey > 0 && 'animate-join-player-warning-button-denial'
+                    )}
+                  >
+                    {loading === 'join-PLAYER' ? (
+                      <InlineLoader size="sm" />
+                    ) : (
+                      <UserRoundPlus className="w-4 h-4" />
+                    )}
+                    Anotarme como jugador
+                  </Button>
+                </span>
                 <Button
                   variant="outline"
                   onClick={() => handleJoin('SUBSTITUTE')}
@@ -1386,7 +1431,13 @@ export function MatchDetailClient({
                 </Button>
               </div>
               {!canJoinAsOfficialPlayer ? (
-                <p className="text-xs text-muted-foreground">
+                <p
+                  key={joinPlayerDenialAnimKey > 0 ? `player-join-warning-${joinPlayerDenialAnimKey}` : 'player-join-warning-idle'}
+                  className={cn(
+                    'text-xs text-muted-foreground',
+                    joinPlayerDenialAnimKey > 0 && playerJoinReservedForSubs && 'animate-join-player-warning-text-denial'
+                  )}
+                >
                   {playerJoinReservedForSubs
                     ? 'Los cupos libres estan reservados para suplentes por orden de anotacion.'
                     : 'El partido ya esta completo. Podes anotarte como suplente.'}
