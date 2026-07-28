@@ -4,10 +4,7 @@ import { MatchCard } from '@/components/match-card'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import Link from 'next/link'
-import { Plus, Calendar, Megaphone, ExternalLink } from 'lucide-react'
-
-const VOTE_FORM_URL =
-  'https://docs.google.com/forms/d/e/1FAIpQLSe2L6xT3fZDEJuyOHVjOrI-eK3XhqJ48YEJoupRibt9VBlFfg/viewform'
+import { Plus, Calendar } from 'lucide-react'
 import type { MatchCountsSummary } from '@/lib/match-summary'
 
 type Match = MatchCountsSummary & {
@@ -97,27 +94,6 @@ export default async function DashboardPage() {
 
   return (
     <div className="flex flex-col gap-6">
-      <div className="rounded-lg border-2 border-golden bg-golden/15 p-4 flex flex-col sm:flex-row sm:items-center gap-3">
-        <div className="flex items-start gap-3 flex-1">
-          <Megaphone className="w-5 h-5 text-golden shrink-0 mt-0.5" />
-          <div>
-            <p className="font-semibold text-foreground">¡Votá por Santiago Reyes!</p>
-            <p className="text-sm text-muted-foreground">
-              Elegí la <span className="font-medium text-foreground">Foto N°51</span> en el formulario del link.
-            </p>
-          </div>
-        </div>
-        <a
-          href={VOTE_FORM_URL}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="inline-flex items-center justify-center gap-2 rounded-md bg-golden px-4 py-2 text-sm font-medium text-golden-foreground hover:bg-golden/90 shrink-0"
-        >
-          Ir a votar
-          <ExternalLink className="w-4 h-4" />
-        </a>
-      </div>
-
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-foreground">Hola, {displayName(`${session?.name ?? ''} ${session?.lastName ?? ''}`.trim())}</h1>
