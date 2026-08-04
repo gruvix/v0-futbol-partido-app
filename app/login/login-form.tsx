@@ -15,11 +15,15 @@ import { Label } from '@/components/ui/label'
 import { Eye, EyeOff } from 'lucide-react'
 
 const STORAGE_KEY_REMEMBER = 'fulbito_login_remember'
-const STORAGE_KEY_CREDENTIALS = 'fulbito_login_credentials_v1'
+const STORAGE_KEY_CREDENTIALS = 'fulbito_login_credentials_v2'
+
+type LoginMode = 'phone' | 'email'
 
 type RememberedCredentials = {
+  mode: LoginMode
   name: string
   phoneLast4: string
+  email: string
   password: string
 }
 
@@ -30,11 +34,13 @@ function safeParseCredentials(raw: string | null): RememberedCredentials | null 
     if (!parsed || typeof parsed !== 'object') return null
 
     const obj = parsed as Record<string, unknown>
+    const mode = obj.mode === 'email' ? 'email' : 'phone'
     const name = typeof obj.name === 'string' ? obj.name : ''
     const phoneLast4 = typeof obj.phoneLast4 === 'string' ? obj.phoneLast4 : ''
+    const email = typeof obj.email === 'string' ? obj.email : ''
     const password = typeof obj.password === 'string' ? obj.password : ''
 
-    return { name, phoneLast4, password }
+    return { mode, name, phoneLast4, email, password }
   } catch {
     return null
   }
@@ -42,8 +48,10 @@ function safeParseCredentials(raw: string | null): RememberedCredentials | null 
 
 export function LoginForm(): React.JSX.Element {
   const [loading, setLoading] = useState<boolean>(false)
+  const [mode, setMode] = useState<LoginMode>('phone')
   const [name, setName] = useState<string>('')
   const [phoneLast4, setPhoneLast4] = useState<string>('')
+  const [email, setEmail] = useState<string>('')
   const [password, setPassword] = useState<string>('')
   const [remember, setRemember] = useState<boolean>(false)
   const [showPassword, setShowPassword] = useState<boolean>(false)
@@ -72,8 +80,10 @@ export function LoginForm(): React.JSX.Element {
     if (rememberEnabled) {
       setRemember(true)
       if (savedCredentials) {
+        setMode(savedCredentials.mode)
         setName(savedCredentials.name)
         setPhoneLast4(savedCredentials.phoneLast4)
+        setEmail(savedCredentials.email)
         setPassword(savedCredentials.password)
       }
       return
@@ -91,7 +101,7 @@ export function LoginForm(): React.JSX.Element {
   useEffect(() => {
     if (remember) {
       localStorage.setItem(STORAGE_KEY_REMEMBER, '1')
-      const credentials: RememberedCredentials = { name, phoneLast4, password }
+      const credentials: RememberedCredentials = { mode, name, phoneLast4, email, password }
       localStorage.setItem(STORAGE_KEY_CREDENTIALS, JSON.stringify(credentials))
 
       // Keep legacy keys updated for backwards-compat with older deployments.
@@ -106,7 +116,7 @@ export function LoginForm(): React.JSX.Element {
 
       previousRememberRef.current = false
     }
-  }, [remember, name, phoneLast4, password])
+  }, [remember, mode, name, phoneLast4, email, password])
 
   // Keyboard navigation: Enter moves focus to next field
   function handleNameKeyDown(e: React.KeyboardEvent<HTMLInputElement>): void {
@@ -128,9 +138,12 @@ export function LoginForm(): React.JSX.Element {
     setLoading(true)
 
     const formData = new FormData(e.currentTarget)
-    // Username is case-insensitive: always normalize to lowercase before sending.
-    const rawName = (formData.get('name') as string | null) ?? ''
-    formData.set('name', rawName.trim().toLowerCase())
+    formData.set('mode', mode)
+    if (mode === 'phone') {
+      // Username is case-insensitive: always normalize to lowercase before sending.
+      const rawName = (formData.get('name') as string | null) ?? ''
+      formData.set('name', rawName.trim().toLowerCase())
+    }
     const result = await login(formData)
 
     if (result?.error) {
@@ -154,57 +167,109 @@ export function LoginForm(): React.JSX.Element {
         </CardHeader>
         <CardContent>
           <form onSubmit={handleSubmit} className="flex flex-col gap-4">
-            {/* Combined identifier: Name + Last 4 digits side by side */}
-            <div className="flex flex-col gap-2">
-              <Label htmlFor="name">Identificacion</Label>
-              <div className="flex items-center">
-                <Input
-                  ref={nameInputRef}
-                  id="name"
-                  name="name"
-                  type="text"
-                  placeholder="Tu nombre"
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  onKeyDown={handleNameKeyDown}
-                  required
-                  autoComplete="username"
-                  disabled={loading}
-                  className="rounded-r-none border-r-0 flex-1"
-                />
-                <div className="flex items-center justify-center px-2 h-9 border-y border-border bg-muted text-muted-foreground text-sm select-none">
-                  -
-                </div>
-                <Input
-                  ref={phoneInputRef}
-                  id="phoneLast4"
-                  name="phoneLast4"
-                  type="text"
-                  inputMode="numeric"
-                  pattern="\d{4}"
-                  maxLength={4}
-                  placeholder="1234"
-                  value={phoneLast4}
-                  onChange={(e) => setPhoneLast4(e.target.value)}
-                  onKeyDown={handlePhoneKeyDown}
-                  required
-                  disabled={loading}
-                  className="rounded-l-none border-l-0 w-20"
-                  onInvalid={(e) =>
-                    e.currentTarget.setCustomValidity('Ingresá exactamente 4 dígitos numéricos')
-                  }
-                  onInput={(e) =>
-                    e.currentTarget.setCustomValidity('')
-                  }
-                />
-              </div>
-              <p className="text-xs text-muted-foreground">
-                Nombre + ultimos 4 digitos del celular
-              </p>
+            {/* Login mode toggle */}
+            <div className="flex rounded-lg border border-border p-1 bg-muted/30">
+              <button
+                type="button"
+                disabled={loading}
+                onClick={() => setMode('phone')}
+                className={`flex-1 rounded-md py-1.5 text-sm font-medium transition-colors ${
+                  mode === 'phone' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground'
+                }`}
+              >
+                Telefono
+              </button>
+              <button
+                type="button"
+                disabled={loading}
+                onClick={() => setMode('email')}
+                className={`flex-1 rounded-md py-1.5 text-sm font-medium transition-colors ${
+                  mode === 'email' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground'
+                }`}
+              >
+                Email
+              </button>
             </div>
 
+            {mode === 'phone' ? (
+              /* Combined identifier: Name + Last 4 digits side by side */
+              <div className="flex flex-col gap-2">
+                <Label htmlFor="name">Identificacion</Label>
+                <div className="flex items-center">
+                  <Input
+                    ref={nameInputRef}
+                    id="name"
+                    name="name"
+                    type="text"
+                    placeholder="Tu nombre"
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                    onKeyDown={handleNameKeyDown}
+                    required
+                    autoComplete="username"
+                    disabled={loading}
+                    className="rounded-r-none border-r-0 flex-1"
+                  />
+                  <div className="flex items-center justify-center px-2 h-9 border-y border-border bg-muted text-muted-foreground text-sm select-none">
+                    -
+                  </div>
+                  <Input
+                    ref={phoneInputRef}
+                    id="phoneLast4"
+                    name="phoneLast4"
+                    type="text"
+                    inputMode="numeric"
+                    pattern="\d{4}"
+                    maxLength={4}
+                    placeholder="1234"
+                    value={phoneLast4}
+                    onChange={(e) => setPhoneLast4(e.target.value)}
+                    onKeyDown={handlePhoneKeyDown}
+                    required
+                    disabled={loading}
+                    className="rounded-l-none border-l-0 w-20"
+                    onInvalid={(e) =>
+                      e.currentTarget.setCustomValidity('Ingresá exactamente 4 dígitos numéricos')
+                    }
+                    onInput={(e) =>
+                      e.currentTarget.setCustomValidity('')
+                    }
+                  />
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Nombre + ultimos 4 digitos del celular
+                </p>
+              </div>
+            ) : (
+              <div className="flex flex-col gap-2">
+                <Label htmlFor="email">Email</Label>
+                <Input
+                  id="email"
+                  name="email"
+                  type="email"
+                  placeholder="tu@email.com"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault()
+                      passwordInputRef.current?.focus()
+                    }
+                  }}
+                  required
+                  autoComplete="email"
+                  disabled={loading}
+                />
+              </div>
+            )}
+
             <div className="flex flex-col gap-2">
-              <Label htmlFor="password">Contraseña</Label>
+              <div className="flex items-center justify-between">
+                <Label htmlFor="password">Contraseña</Label>
+                <Link href="/forgot-password" className="text-xs text-primary underline underline-offset-2">
+                  Olvidaste tu contraseña?
+                </Link>
+              </div>
               <div className="relative">
                 <Input
                   ref={passwordInputRef}

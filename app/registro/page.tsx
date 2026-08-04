@@ -137,6 +137,22 @@ export default function RegistroPage() {
               </div>
 
               <div className="flex flex-col gap-2">
+                <Label htmlFor="email">Email</Label>
+                <Input
+                  id="email"
+                  name="email"
+                  type="email"
+                  placeholder="tu@email.com"
+                  required
+                  autoComplete="email"
+                  disabled={loading}
+                />
+                <p className="text-xs text-muted-foreground">
+                  Lo usamos para recuperar tu cuenta y podes usarlo para iniciar sesion
+                </p>
+              </div>
+
+              <div className="flex flex-col gap-2">
                 <Label htmlFor="password">Contraseña</Label>
                 <div className="relative">
                   <Input

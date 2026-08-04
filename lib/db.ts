@@ -146,9 +146,38 @@ export async function initializeDatabase() {
     await sql`ALTER TABLE matches ADD COLUMN IF NOT EXISTS field_rent_total INTEGER`
     await sql`ALTER TABLE matches ADD COLUMN IF NOT EXISTS auto_admin_registered_players BOOLEAN DEFAULT false`
     await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS pixel_avatar TEXT`
+
+    // Email auth: nullable for existing users, required for new registrations going forward.
+    await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS email VARCHAR(255)`
+    await sql`ALTER TABLE pending_users ADD COLUMN IF NOT EXISTS email VARCHAR(255)`
   } catch {
     // Columns might already exist
   }
+
+  // Case-insensitive uniqueness on email (nullable column: multiple NULLs allowed).
+  try {
+    await sql`
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email_unique
+      ON users(lower(email))
+      WHERE email IS NOT NULL
+    `
+  } catch {
+    // Index might already exist
+  }
+
+  // Password reset tokens (email-based recovery)
+  await sql`
+    CREATE TABLE IF NOT EXISTS password_reset_tokens (
+      id SERIAL PRIMARY KEY,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      token_hash VARCHAR(64) NOT NULL,
+      expires_at TIMESTAMP WITH TIME ZONE NOT NULL,
+      used_at TIMESTAMP WITH TIME ZONE,
+      created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+    )
+  `
+  await sql`CREATE INDEX IF NOT EXISTS idx_pwreset_token_hash ON password_reset_tokens(token_hash)`
+  await sql`CREATE INDEX IF NOT EXISTS idx_pwreset_user_id ON password_reset_tokens(user_id)`
 
   try {
     await sql`ALTER TABLE match_participants ADD COLUMN IF NOT EXISTS team_number INTEGER`

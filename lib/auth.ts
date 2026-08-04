@@ -1,13 +1,19 @@
 import { sql } from './db'
 import { cookies } from 'next/headers'
 import bcrypt from 'bcryptjs'
+import { sendPasswordResetEmail, buildResetPasswordUrl } from './email'
 
 const SESSION_DURATION_DAYS = 30
+const RESET_TOKEN_DURATION_MINUTES = 30
 
 // Set REQUIRE_APPROVAL=true to enable manual approval for new users
 const REQUIRE_APPROVAL = process.env.REQUIRE_APPROVAL === 'true'
 
 export type UserGender = 'MALE' | 'FEMALE' | 'OTHER'
+
+export type LoginCredentials =
+  | { mode: 'phone'; name: string; phoneLast4: string; password: string }
+  | { mode: 'email'; email: string; password: string }
 
 function normalizeUserName(input: string): string {
   // Registration/login identifier must be case-insensitive and stored lowercase.
@@ -18,10 +24,26 @@ function normalizeNamePart(input: string): string {
   return input.trim()
 }
 
+function normalizeEmail(input: string): string {
+  return input.trim().toLowerCase()
+}
+
 function ensureAlphanumericOnly(value: string, fieldLabel: string): void {
   if (!/^[a-z0-9]+$/i.test(value)) {
     throw new Error(`${fieldLabel} solo puede contener letras y numeros (sin espacios ni simbolos)`) 
   }
+}
+
+function ensureValidEmail(value: string): void {
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)) {
+    throw new Error('Ingresa un email valido')
+  }
+}
+
+async function hashToken(token: string): Promise<string> {
+  const data = new TextEncoder().encode(token)
+  const hashBuffer = await crypto.subtle.digest('SHA-256', data)
+  return Array.from(new Uint8Array(hashBuffer), byte => byte.toString(16).padStart(2, '0')).join('')
 }
 
 export async function hashPassword(password: string): Promise<string> {
@@ -67,7 +89,7 @@ export async function getSession() {
   if (!token) return null
 
   const sessions = await sql`
-    SELECT s.*, u.id as user_id, u.name, u.last_name, u.phone_last_four, u.is_approved, u.admin, u.gender
+    SELECT s.*, u.id as user_id, u.name, u.last_name, u.phone_last_four, u.email, u.is_approved, u.admin, u.gender
     FROM sessions s
     JOIN users u ON s.user_id = u.id
     WHERE s.token = ${token} AND s.expires_at > NOW()
@@ -80,6 +102,7 @@ export async function getSession() {
     name: sessions[0].name,
     lastName: sessions[0].last_name,
     phoneLast4: sessions[0].phone_last_four,
+    email: sessions[0].email as string | null,
     isApproved: sessions[0].is_approved,
     admin: sessions[0].admin,
     gender: sessions[0].gender as UserGender,
@@ -100,11 +123,13 @@ export async function registerUser(
   name: string,
   lastName: string,
   phoneLast4: string,
+  email: string,
   password: string,
   gender: UserGender,
 ) {
   const normalizedName = normalizeUserName(name)
   const normalizedLastName = normalizeNamePart(lastName)
+  const normalizedEmail = normalizeEmail(email)
 
   if (!normalizedLastName) {
     throw new Error('Apellido es requerido')
@@ -113,18 +138,20 @@ export async function registerUser(
   // Rules: no symbols, no spaces, only alphanumeric.
   ensureAlphanumericOnly(normalizedName, 'Nombre')
   ensureAlphanumericOnly(normalizedLastName, 'Apellido')
+  ensureValidEmail(normalizedEmail)
 
   const passwordHash = await hashPassword(password)
 
-  // Check if user already exists
+  // Check if user already exists (by name+phone identity, or by email)
   const existingUsers = await sql`
     SELECT id
     FROM users
-    WHERE lower(name) = ${normalizedName} AND phone_last_four = ${phoneLast4}
+    WHERE (lower(name) = ${normalizedName} AND phone_last_four = ${phoneLast4})
+       OR lower(email) = ${normalizedEmail}
   `
   
   if (existingUsers.length > 0) {
-    throw new Error('Ya existe un usuario con ese nombre y numero')
+    throw new Error('Ya existe un usuario con ese nombre y numero, o ese email')
   }
 
   if (REQUIRE_APPROVAL) {
@@ -132,7 +159,8 @@ export async function registerUser(
     const existingPending = await sql`
       SELECT id
       FROM pending_users
-      WHERE lower(name) = ${normalizedName} AND phone_last_four = ${phoneLast4}
+      WHERE (lower(name) = ${normalizedName} AND phone_last_four = ${phoneLast4})
+         OR lower(email) = ${normalizedEmail}
     `
     
     if (existingPending.length > 0) {
@@ -141,16 +169,16 @@ export async function registerUser(
 
     // Create pending user
     await sql`
-      INSERT INTO pending_users (name, last_name, phone_last_four, password_hash, gender)
-      VALUES (${normalizedName}, ${normalizedLastName}, ${phoneLast4}, ${passwordHash}, ${gender})
+      INSERT INTO pending_users (name, last_name, phone_last_four, email, password_hash, gender)
+      VALUES (${normalizedName}, ${normalizedLastName}, ${phoneLast4}, ${normalizedEmail}, ${passwordHash}, ${gender})
     `
 
     return { pending: true }
   } else {
     // Create user directly (no approval needed)
     const result = await sql`
-      INSERT INTO users (name, last_name, phone_last_four, password_hash, gender, is_approved)
-      VALUES (${normalizedName}, ${normalizedLastName}, ${phoneLast4}, ${passwordHash}, ${gender}, true)
+      INSERT INTO users (name, last_name, phone_last_four, email, password_hash, gender, is_approved)
+      VALUES (${normalizedName}, ${normalizedLastName}, ${phoneLast4}, ${normalizedEmail}, ${passwordHash}, ${gender}, true)
       RETURNING id
     `
     
@@ -161,27 +189,32 @@ export async function registerUser(
   }
 }
 
-export async function loginUser(name: string, phoneLast4: string, password: string) {
-  const normalizedName = normalizeUserName(name)
-
-  const users = await sql`
-    SELECT id, password_hash, is_approved FROM users 
-    WHERE lower(name) = ${normalizedName} AND phone_last_four = ${phoneLast4}
-  `
+export async function loginUser(credentials: LoginCredentials) {
+  const users =
+    credentials.mode === 'email'
+      ? await sql`
+          SELECT id, password_hash, is_approved FROM users
+          WHERE lower(email) = ${normalizeEmail(credentials.email)}
+        `
+      : await sql`
+          SELECT id, password_hash, is_approved FROM users 
+          WHERE lower(name) = ${normalizeUserName(credentials.name)} AND phone_last_four = ${credentials.phoneLast4}
+        `
 
   if (users.length === 0) {
     if (REQUIRE_APPROVAL) {
-      // Check if pending
-      const pending = await sql`
-        SELECT id
-        FROM pending_users
-        WHERE lower(name) = ${normalizedName} AND phone_last_four = ${phoneLast4}
-      `
+      const pending =
+        credentials.mode === 'email'
+          ? await sql`SELECT id FROM pending_users WHERE lower(email) = ${normalizeEmail(credentials.email)}`
+          : await sql`
+              SELECT id FROM pending_users
+              WHERE lower(name) = ${normalizeUserName(credentials.name)} AND phone_last_four = ${credentials.phoneLast4}
+            `
       if (pending.length > 0) {
         throw new Error('Tu cuenta esta pendiente de aprobacion')
       }
     }
-    throw new Error('Usuario no encontrado')
+    throw new Error(credentials.mode === 'email' ? 'Email no encontrado' : 'Usuario no encontrado')
   }
 
   const user = users[0]
@@ -190,7 +223,7 @@ export async function loginUser(name: string, phoneLast4: string, password: stri
     throw new Error('Tu cuenta no esta aprobada')
   }
 
-  const validPassword = await verifyPassword(password, user.password_hash)
+  const validPassword = await verifyPassword(credentials.password, user.password_hash)
   if (!validPassword) {
     throw new Error('Contraseña incorrecta')
   }
@@ -201,4 +234,62 @@ export async function loginUser(name: string, phoneLast4: string, password: stri
 
 export function isApprovalRequired() {
   return REQUIRE_APPROVAL
+}
+
+export async function setUserEmail(userId: number, email: string): Promise<void> {
+  const normalizedEmail = normalizeEmail(email)
+  ensureValidEmail(normalizedEmail)
+
+  const existing = await sql`
+    SELECT id FROM users WHERE lower(email) = ${normalizedEmail} AND id <> ${userId}
+  `
+  if (existing.length > 0) {
+    throw new Error('Ese email ya esta en uso')
+  }
+
+  await sql`
+    UPDATE users SET email = ${normalizedEmail}, updated_at = NOW() WHERE id = ${userId}
+  `
+}
+
+export async function requestPasswordReset(email: string): Promise<void> {
+  const normalizedEmail = normalizeEmail(email)
+
+  const users = await sql`SELECT id FROM users WHERE lower(email) = ${normalizedEmail}`
+  if (users.length === 0) {
+    // Do not reveal whether the email exists.
+    return
+  }
+
+  const userId = users[0].id
+  const token = generateSessionToken()
+  const tokenHash = await hashToken(token)
+  const expiresAt = new Date(Date.now() + RESET_TOKEN_DURATION_MINUTES * 60 * 1000)
+
+  await sql`
+    INSERT INTO password_reset_tokens (user_id, token_hash, expires_at)
+    VALUES (${userId}, ${tokenHash}, ${expiresAt.toISOString()})
+  `
+
+  await sendPasswordResetEmail(normalizedEmail, buildResetPasswordUrl(token))
+}
+
+export async function resetPassword(token: string, newPassword: string): Promise<void> {
+  const tokenHash = await hashToken(token)
+
+  const rows = await sql`
+    SELECT id, user_id FROM password_reset_tokens
+    WHERE token_hash = ${tokenHash} AND used_at IS NULL AND expires_at > NOW()
+  `
+  if (rows.length === 0) {
+    throw new Error('El enlace de recuperacion es invalido o expiro')
+  }
+
+  const { id, user_id: userId } = rows[0]
+  const passwordHash = await hashPassword(newPassword)
+
+  await sql`UPDATE users SET password_hash = ${passwordHash}, updated_at = NOW() WHERE id = ${userId}`
+  await sql`UPDATE password_reset_tokens SET used_at = NOW() WHERE id = ${id}`
+  // Invalidate all existing sessions for this user as a security measure.
+  await sql`DELETE FROM sessions WHERE user_id = ${userId}`
 }
