@@ -1,0 +1,28 @@
+{
+  "mcpServers": {
+    "postgres-readonly": {
+      "command": "npx",
+      "args": ["-y", "mcp-postgres-server"],
+      "env": {
+        "PG_HOST": "${env:PG_HOST}",
+        "PG_PORT": "${env:PG_PORT}",
+        "PG_DATABASE": "${env:PG_DATABASE}",
+        "PG_USER": "${env:PG_READONLY_USER}",
+        "PG_PASSWORD": "${env:PG_READONLY_PASSWORD}",
+        "PG_SSL": "true"
+      }
+    },
+    "postgres-write": {
+      "command": "npx",
+      "args": ["-y", "mcp-postgres-server"],
+      "env": {
+        "PG_HOST": "${env:PG_HOST}",
+        "PG_PORT": "${env:PG_PORT}",
+        "PG_DATABASE": "${env:PG_DATABASE}",
+        "PG_USER": "${env:PG_WRITE_USER}",
+        "PG_PASSWORD": "${env:PG_WRITE_PASSWORD}",
+        "PG_SSL": "true"
+      }
+    }
+  }
+}
