@@ -1,90 +1,51 @@
-'use client'
-
-import React, { Suspense, useEffect, useRef, useState } from 'react'
+import React, { Suspense } from 'react'
 import Link from 'next/link'
-import { useRouter, useSearchParams } from 'next/navigation'
 
-import { confirmEmailChangeAction } from '@/app/actions/auth'
+import { confirmEmailChange } from '@/lib/auth'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 
-function ConfirmEmailContent(): React.JSX.Element {
-  const searchParams = useSearchParams()
-  const router = useRouter()
-  const token = searchParams.get('token') ?? ''
-  const startedRef = useRef(false)
-
-  const [loading, setLoading] = useState(Boolean(token))
-  const [error, setError] = useState<string | null>(null)
-  const [success, setSuccess] = useState(false)
-
-  useEffect(() => {
-    if (!token || startedRef.current) return
-    startedRef.current = true
-
-    confirmEmailChangeAction(token)
-      .then((result) => {
-        if (result?.error) {
-          setError(result.error)
-          return
-        }
-        setSuccess(true)
-      })
-      .catch(() => {
-        setError('Error al confirmar el email')
-      })
-      .finally(() => {
-        setLoading(false)
-      })
-  }, [token])
-
-  if (!token) {
+async function ConfirmEmailResult({ token }: { token: string }): Promise<React.JSX.Element> {
+  try {
+    await confirmEmailChange(token)
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Error al confirmar el email'
     return (
       <div className="flex flex-col gap-4 text-center">
         <div className="rounded-lg bg-destructive/10 p-4">
-          <p className="text-foreground font-medium">Este enlace es invalido o esta incompleto.</p>
+          <p className="text-foreground font-medium">{message}</p>
         </div>
-        <Link href="/dashboard/configuracion">
+        <Link href="/login">
           <Button variant="outline" className="w-full bg-transparent">
-            Ir a configuracion
+            Ir al login
           </Button>
         </Link>
       </div>
     )
   }
 
-  if (loading) {
-    return <p className="text-sm text-muted-foreground text-center">Confirmando tu nuevo email...</p>
-  }
-
-  if (success) {
-    return (
-      <div className="flex flex-col gap-4 text-center">
-        <div className="rounded-lg bg-primary/10 p-4">
-          <p className="text-foreground font-medium">Tu email fue actualizado correctamente.</p>
-        </div>
-        <Button className="w-full" onClick={() => router.push('/dashboard/configuracion')}>
-          Ir a configuracion
-        </Button>
-      </div>
-    )
-  }
-
   return (
     <div className="flex flex-col gap-4 text-center">
-      <div className="rounded-lg bg-destructive/10 p-4">
-        <p className="text-foreground font-medium">{error ?? 'No se pudo confirmar el email.'}</p>
+      <div className="rounded-lg bg-primary/10 p-4">
+        <p className="text-foreground font-medium">Tu email fue actualizado correctamente.</p>
+        <p className="text-sm text-muted-foreground mt-2">
+          Por seguridad cerramos tus sesiones. Volvé a iniciar sesión con tu nuevo email.
+        </p>
       </div>
-      <Link href="/dashboard/configuracion">
-        <Button variant="outline" className="w-full bg-transparent">
-          Volver a configuracion
-        </Button>
+      <Link href="/login">
+        <Button className="w-full">Ir al login</Button>
       </Link>
     </div>
   )
 }
 
-export default function ConfirmEmailPage(): React.JSX.Element {
+export default async function ConfirmEmailPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ token?: string }>
+}): Promise<React.JSX.Element> {
+  const { token } = await searchParams
+
   return (
     <main className="min-h-screen flex items-center justify-center bg-white/40 p-4">
       <Card className="w-full max-w-md">
@@ -95,9 +56,22 @@ export default function ConfirmEmailPage(): React.JSX.Element {
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <Suspense fallback={<p className="text-sm text-muted-foreground text-center">Cargando...</p>}>
-            <ConfirmEmailContent />
-          </Suspense>
+          {!token ? (
+            <div className="flex flex-col gap-4 text-center">
+              <div className="rounded-lg bg-destructive/10 p-4">
+                <p className="text-foreground font-medium">Este enlace es invalido o esta incompleto.</p>
+              </div>
+              <Link href="/dashboard/configuracion">
+                <Button variant="outline" className="w-full bg-transparent">
+                  Ir a configuracion
+                </Button>
+              </Link>
+            </div>
+          ) : (
+            <Suspense fallback={<p className="text-sm text-muted-foreground text-center">Confirmando tu nuevo email...</p>}>
+              <ConfirmEmailResult token={token} />
+            </Suspense>
+          )}
         </CardContent>
       </Card>
     </main>

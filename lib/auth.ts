@@ -2,6 +2,7 @@ import { sql } from './db'
 import { cookies } from 'next/headers'
 import bcrypt from 'bcryptjs'
 import { sendPasswordResetEmail, buildResetPasswordUrl, sendEmailChangeConfirmationEmail, buildConfirmEmailChangeUrl } from './email'
+import { validateRegistrationInvite, consumeRegistrationInvite } from './invitations'
 
 const SESSION_DURATION_DAYS = 30
 const RESET_TOKEN_DURATION_MINUTES = 30
@@ -132,16 +133,21 @@ export async function registerUser(
   gender: UserGender,
   inviteToken?: string,
 ) {
+  let registrationInviteId: number | null = null
+
   if (INVITE_ONLY_REGISTRATION) {
     if (!inviteToken?.trim()) {
       throw new Error('Se requiere un enlace de invitacion valido para registrarse')
     }
-    // Full token validation (single-use, expiry) is implemented in lib/invitations.ts (Phase 2).
   }
 
   const normalizedName = normalizeUserName(name)
   const normalizedLastName = normalizeNamePart(lastName)
   const normalizedEmail = normalizeEmail(email)
+
+  if (INVITE_ONLY_REGISTRATION) {
+    registrationInviteId = await validateRegistrationInvite(inviteToken!.trim(), normalizedEmail)
+  }
 
   if (!normalizedLastName) {
     throw new Error('Apellido es requerido')
@@ -185,6 +191,10 @@ export async function registerUser(
       VALUES (${normalizedName}, ${normalizedLastName}, ${phoneLast4}, ${normalizedEmail}, ${passwordHash}, ${gender})
     `
 
+    if (registrationInviteId !== null) {
+      await consumeRegistrationInvite(registrationInviteId)
+    }
+
     return { pending: true }
   } else {
     // Create user directly (no approval needed)
@@ -196,6 +206,10 @@ export async function registerUser(
     
     // Auto-login the new user
     await createSession(result[0].id)
+
+    if (registrationInviteId !== null) {
+      await consumeRegistrationInvite(registrationInviteId, result[0].id)
+    }
     
     return { pending: false, userId: result[0].id }
   }
@@ -226,7 +240,7 @@ export async function loginUser(credentials: LoginCredentials) {
         throw new Error('Tu cuenta esta pendiente de aprobacion')
       }
     }
-    throw new Error(credentials.mode === 'email' ? 'Email no encontrado' : 'Usuario no encontrado')
+    throw new Error('Usuario no encontrado')
   }
 
   const user = users[0]
@@ -303,47 +317,69 @@ export async function requestEmailChange(userId: number, newEmail: string): Prom
   const tokenHash = await hashToken(token)
   const expiresAt = new Date(Date.now() + EMAIL_CHANGE_TOKEN_DURATION_HOURS * 60 * 60 * 1000)
 
-  // Send first so we don't orphan tokens when Resend rejects the request.
-  await sendEmailChangeConfirmationEmail(normalizedEmail, buildConfirmEmailChangeUrl(token))
-
   await sql`
     UPDATE email_change_tokens
     SET used_at = NOW()
     WHERE user_id = ${userId} AND used_at IS NULL
   `
 
-  await sql`
+  const inserted = await sql`
     INSERT INTO email_change_tokens (user_id, new_email, token_hash, expires_at)
     VALUES (${userId}, ${normalizedEmail}, ${tokenHash}, ${expiresAt.toISOString()})
+    RETURNING id
   `
+  const tokenRowId = inserted[0].id as number
+
+  try {
+    await sendEmailChangeConfirmationEmail(normalizedEmail, buildConfirmEmailChangeUrl(token))
+  } catch (error) {
+    await sql`UPDATE email_change_tokens SET used_at = NOW() WHERE id = ${tokenRowId}`
+    throw error
+  }
 }
 
 export async function confirmEmailChange(token: string): Promise<void> {
   const tokenHash = await hashToken(token)
 
   const rows = await sql`
-    SELECT id, user_id, new_email
+    SELECT id, user_id, new_email, used_at, expires_at
     FROM email_change_tokens
-    WHERE token_hash = ${tokenHash} AND used_at IS NULL AND expires_at > NOW()
+    WHERE token_hash = ${tokenHash}
   `
   if (rows.length === 0) {
     throw new Error('El enlace de confirmacion es invalido o expiro')
   }
 
-  const { id, user_id: userId, new_email: newEmail } = rows[0]
-  const normalizedEmail = normalizeEmail(newEmail as string)
+  const row = rows[0]
+  const userId = row.user_id as number
+  const normalizedEmail = normalizeEmail(row.new_email as string)
+
+  if (row.used_at) {
+    const users = await sql`SELECT email FROM users WHERE id = ${userId}`
+    const currentEmail = users[0]?.email as string | null
+    if (currentEmail && normalizeEmail(currentEmail) === normalizedEmail) {
+      return
+    }
+    throw new Error('El enlace de confirmacion es invalido o expiro')
+  }
+
+  if (new Date(row.expires_at as string) <= new Date()) {
+    throw new Error('El enlace de confirmacion es invalido o expiro')
+  }
+
   ensureValidEmail(normalizedEmail)
-  await assertEmailAvailable(userId as number, normalizedEmail)
+  await assertEmailAvailable(userId, normalizedEmail)
 
   await sql`
     UPDATE users SET email = ${normalizedEmail}, updated_at = NOW() WHERE id = ${userId}
   `
-  await sql`UPDATE email_change_tokens SET used_at = NOW() WHERE id = ${id}`
+  await sql`UPDATE email_change_tokens SET used_at = NOW() WHERE id = ${row.id}`
   await sql`
     UPDATE email_change_tokens
     SET used_at = NOW()
     WHERE user_id = ${userId} AND used_at IS NULL
   `
+  await sql`DELETE FROM sessions WHERE user_id = ${userId}`
 }
 
 export async function requestPasswordReset(email: string): Promise<void> {
@@ -360,13 +396,25 @@ export async function requestPasswordReset(email: string): Promise<void> {
   const tokenHash = await hashToken(token)
   const expiresAt = new Date(Date.now() + RESET_TOKEN_DURATION_MINUTES * 60 * 1000)
 
-  // Send first so we don't orphan tokens when Resend rejects the request.
-  await sendPasswordResetEmail(normalizedEmail, buildResetPasswordUrl(token))
-
   await sql`
+    UPDATE password_reset_tokens
+    SET used_at = NOW()
+    WHERE user_id = ${userId} AND used_at IS NULL
+  `
+
+  const inserted = await sql`
     INSERT INTO password_reset_tokens (user_id, token_hash, expires_at)
     VALUES (${userId}, ${tokenHash}, ${expiresAt.toISOString()})
+    RETURNING id
   `
+  const tokenRowId = inserted[0].id as number
+
+  try {
+    await sendPasswordResetEmail(normalizedEmail, buildResetPasswordUrl(token))
+  } catch (error) {
+    await sql`UPDATE password_reset_tokens SET used_at = NOW() WHERE id = ${tokenRowId}`
+    throw error
+  }
 }
 
 export async function resetPassword(token: string, newPassword: string): Promise<void> {

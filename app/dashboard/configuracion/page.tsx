@@ -284,6 +284,7 @@ export default function ConfiguracionPage(): React.JSX.Element {
       }
       setEmailSaved(true)
       setSavedEmail(email.trim())
+      router.refresh()
     } catch (e: unknown) {
       console.error(e)
       showError('Error al guardar email')

@@ -1,4 +1,5 @@
 import { neon } from '@neondatabase/serverless'
+import { isPgAlreadyExistsError } from './pg-errors'
 
 function getDatabaseUrl(): string {
   const url = process.env.DATABASE_URL
@@ -12,6 +13,18 @@ function getDatabaseUrl(): string {
 }
 
 export const sql = neon(getDatabaseUrl())
+
+export async function ensureRateLimitSchema(): Promise<void> {
+  await sql`
+    CREATE TABLE IF NOT EXISTS rate_limit_events (
+      id SERIAL PRIMARY KEY,
+      bucket VARCHAR(100) NOT NULL,
+      bucket_key VARCHAR(255) NOT NULL,
+      created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+    )
+  `
+  await sql`CREATE INDEX IF NOT EXISTS idx_rate_limit_bucket_key_time ON rate_limit_events(bucket, bucket_key, created_at)`
+}
 
 export async function initializeDatabase() {
   // Create enum types (ignore if already exists)
@@ -161,8 +174,11 @@ export async function initializeDatabase() {
       ON users(lower(email))
       WHERE email IS NOT NULL
     `
-  } catch {
-    // Index might already exist
+  } catch (error) {
+    if (!isPgAlreadyExistsError(error)) {
+      console.error('[db] Failed to create idx_users_email_unique:', error)
+      throw error
+    }
   }
 
   // Password reset tokens (email-based recovery)
@@ -200,9 +216,29 @@ export async function initializeDatabase() {
       ON pending_users(lower(email))
       WHERE email IS NOT NULL
     `
-  } catch {
-    // Index might already exist
+  } catch (error) {
+    if (!isPgAlreadyExistsError(error)) {
+      console.error('[db] Failed to create idx_pending_users_email_unique:', error)
+      throw error
+    }
   }
+
+  await sql`
+    CREATE TABLE IF NOT EXISTS user_registration_invites (
+      id SERIAL PRIMARY KEY,
+      created_by_user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      invited_email VARCHAR(255),
+      token_hash VARCHAR(64) NOT NULL UNIQUE,
+      expires_at TIMESTAMP WITH TIME ZONE NOT NULL,
+      used_at TIMESTAMP WITH TIME ZONE,
+      used_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+      created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+    )
+  `
+  await sql`CREATE INDEX IF NOT EXISTS idx_registration_invites_token_hash ON user_registration_invites(token_hash)`
+  await sql`CREATE INDEX IF NOT EXISTS idx_registration_invites_created_by ON user_registration_invites(created_by_user_id)`
+
+  await ensureRateLimitSchema()
 
   try {
     await sql`ALTER TABLE match_participants ADD COLUMN IF NOT EXISTS team_number INTEGER`
