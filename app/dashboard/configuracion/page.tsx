@@ -5,7 +5,7 @@ import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { ArrowLeft, Save, Settings, LockKeyhole, Bell, Mail } from 'lucide-react'
 
-import { getCurrentUser, updateMyProfile, changeMyPassword, addEmailToProfile } from '@/app/actions/auth'
+import { getCurrentUser, updateMyProfile, changeMyPassword, addEmailToProfile, requestEmailChangeAction } from '@/app/actions/auth'
 import {
   getPushNotificationsSettings,
   updatePushNotificationsSettings,
@@ -59,7 +59,11 @@ export default function ConfiguracionPage(): React.JSX.Element {
   const [savingAvatar, setSavingAvatar] = useState<boolean>(false)
   const [avatarData, setAvatarData] = useState<string | null>(null)
   const [email, setEmail] = useState<string>('')
+  const [savedEmail, setSavedEmail] = useState<string | null>(null)
+  const [newEmail, setNewEmail] = useState<string>('')
+  const [confirmEmail, setConfirmEmail] = useState<string>('')
   const [emailSaved, setEmailSaved] = useState<boolean>(false)
+  const [emailChangeSent, setEmailChangeSent] = useState<boolean>(false)
 
   const [profile, setProfile] = useState<ProfileFormState>({
     name: '',
@@ -190,6 +194,7 @@ export default function ConfiguracionPage(): React.JSX.Element {
           gender: (u.gender ?? 'MALE') as UserGender,
         })
         setEmail(u.email ?? '')
+        setSavedEmail(u.email ?? null)
 
         if (notifSettings) {
           setNotifications(notifSettings)
@@ -239,6 +244,31 @@ export default function ConfiguracionPage(): React.JSX.Element {
     }
   }
 
+  async function handleRequestEmailChange(e: React.FormEvent<HTMLFormElement>): Promise<void> {
+    e.preventDefault()
+    setSavingEmail(true)
+    setEmailChangeSent(false)
+    try {
+      const fd = new FormData()
+      fd.set('newEmail', newEmail.trim())
+      fd.set('confirmEmail', confirmEmail.trim())
+
+      const result = await requestEmailChangeAction(fd)
+      if (result?.error) {
+        showError('Error al cambiar email', result.error)
+        return
+      }
+      setEmailChangeSent(true)
+      setNewEmail('')
+      setConfirmEmail('')
+    } catch (e: unknown) {
+      console.error(e)
+      showError('Error al cambiar email')
+    } finally {
+      setSavingEmail(false)
+    }
+  }
+
   async function handleSaveEmail(e: React.FormEvent<HTMLFormElement>): Promise<void> {
     e.preventDefault()
     setSavingEmail(true)
@@ -253,6 +283,7 @@ export default function ConfiguracionPage(): React.JSX.Element {
         return
       }
       setEmailSaved(true)
+      setSavedEmail(email.trim())
     } catch (e: unknown) {
       console.error(e)
       showError('Error al guardar email')
@@ -494,10 +525,78 @@ export default function ConfiguracionPage(): React.JSX.Element {
             Email
           </CardTitle>
           <CardDescription className="text-muted-foreground">
-            Agregalo para poder iniciar sesion con tu email y recuperar tu cuenta si olvidas la contraseña.
+            {savedEmail
+              ? 'Para cambiar tu email, confirmalo desde el correo nuevo. Cada email solo puede usarse en una cuenta.'
+              : 'Agregalo para poder iniciar sesion con tu email y recuperar tu cuenta si olvidas la contraseña. No pedimos verificacion al cargarlo por primera vez.'}
           </CardDescription>
         </CardHeader>
         <CardContent>
+          {savedEmail ? (
+            <form onSubmit={handleRequestEmailChange} className="flex flex-col gap-4">
+              <div className="flex flex-col gap-2">
+                <Label htmlFor="current-email">Email actual</Label>
+                <Input
+                  id="current-email"
+                  name="currentEmail"
+                  type="email"
+                  value={savedEmail}
+                  disabled
+                  readOnly
+                />
+              </div>
+
+              <div className="flex flex-col gap-2">
+                <Label htmlFor="new-email">Nuevo email</Label>
+                <Input
+                  id="new-email"
+                  name="newEmail"
+                  type="email"
+                  placeholder="nuevo@email.com"
+                  required
+                  autoComplete="email"
+                  disabled={loadingUser || savingEmail}
+                  value={newEmail}
+                  onChange={(e) => {
+                    setNewEmail(e.target.value)
+                    setEmailChangeSent(false)
+                  }}
+                />
+              </div>
+
+              <div className="flex flex-col gap-2">
+                <Label htmlFor="confirm-email">Confirmar nuevo email</Label>
+                <Input
+                  id="confirm-email"
+                  name="confirmEmail"
+                  type="email"
+                  placeholder="nuevo@email.com"
+                  required
+                  autoComplete="email"
+                  disabled={loadingUser || savingEmail}
+                  value={confirmEmail}
+                  onChange={(e) => {
+                    setConfirmEmail(e.target.value)
+                    setEmailChangeSent(false)
+                  }}
+                />
+              </div>
+
+              {emailChangeSent && (
+                <div className="rounded-lg bg-primary/10 p-3 text-sm text-foreground">
+                  Te enviamos un email de confirmacion. El cambio se aplica cuando abras el enlace desde el correo nuevo.
+                </div>
+              )}
+
+              <Button
+                type="submit"
+                className="gap-2"
+                disabled={loadingUser || savingEmail || !newEmail.trim() || !confirmEmail.trim()}
+              >
+                <Save className="w-4 h-4" />
+                Enviar confirmacion
+              </Button>
+            </form>
+          ) : (
           <form onSubmit={handleSaveEmail} className="flex flex-col gap-4">
             <div className="flex flex-col gap-2">
               <Label htmlFor="email">Email</Label>
@@ -522,6 +621,7 @@ export default function ConfiguracionPage(): React.JSX.Element {
               {emailSaved ? 'Guardado' : 'Guardar email'}
             </Button>
           </form>
+          )}
         </CardContent>
       </Card>
 

@@ -179,6 +179,31 @@ export async function initializeDatabase() {
   await sql`CREATE INDEX IF NOT EXISTS idx_pwreset_token_hash ON password_reset_tokens(token_hash)`
   await sql`CREATE INDEX IF NOT EXISTS idx_pwreset_user_id ON password_reset_tokens(user_id)`
 
+  // Email change confirmation tokens (new address must be verified before swap)
+  await sql`
+    CREATE TABLE IF NOT EXISTS email_change_tokens (
+      id SERIAL PRIMARY KEY,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      new_email VARCHAR(255) NOT NULL,
+      token_hash VARCHAR(64) NOT NULL,
+      expires_at TIMESTAMP WITH TIME ZONE NOT NULL,
+      used_at TIMESTAMP WITH TIME ZONE,
+      created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+    )
+  `
+  await sql`CREATE INDEX IF NOT EXISTS idx_email_change_token_hash ON email_change_tokens(token_hash)`
+  await sql`CREATE INDEX IF NOT EXISTS idx_email_change_user_id ON email_change_tokens(user_id)`
+
+  try {
+    await sql`
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_pending_users_email_unique
+      ON pending_users(lower(email))
+      WHERE email IS NOT NULL
+    `
+  } catch {
+    // Index might already exist
+  }
+
   try {
     await sql`ALTER TABLE match_participants ADD COLUMN IF NOT EXISTS team_number INTEGER`
     await sql`ALTER TABLE match_participants ADD COLUMN IF NOT EXISTS has_paid BOOLEAN DEFAULT false`

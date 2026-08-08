@@ -1,10 +1,11 @@
 import { sql } from './db'
 import { cookies } from 'next/headers'
 import bcrypt from 'bcryptjs'
-import { sendPasswordResetEmail, buildResetPasswordUrl } from './email'
+import { sendPasswordResetEmail, buildResetPasswordUrl, sendEmailChangeConfirmationEmail, buildConfirmEmailChangeUrl } from './email'
 
 const SESSION_DURATION_DAYS = 30
 const RESET_TOKEN_DURATION_MINUTES = 30
+const EMAIL_CHANGE_TOKEN_DURATION_HOURS = 24
 
 // Set REQUIRE_APPROVAL=true to enable manual approval for new users
 const REQUIRE_APPROVAL = process.env.REQUIRE_APPROVAL === 'true'
@@ -251,19 +252,97 @@ export function isInviteOnlyRegistration() {
   return INVITE_ONLY_REGISTRATION
 }
 
-export async function setUserEmail(userId: number, email: string): Promise<void> {
+export async function assertEmailAvailable(userId: number, email: string): Promise<void> {
   const normalizedEmail = normalizeEmail(email)
-  ensureValidEmail(normalizedEmail)
 
-  const existing = await sql`
+  const existingUser = await sql`
     SELECT id FROM users WHERE lower(email) = ${normalizedEmail} AND id <> ${userId}
   `
-  if (existing.length > 0) {
+  if (existingUser.length > 0) {
     throw new Error('Ese email ya esta en uso')
   }
 
+  const existingPending = await sql`
+    SELECT id FROM pending_users WHERE lower(email) = ${normalizedEmail}
+  `
+  if (existingPending.length > 0) {
+    throw new Error('Ese email ya esta en uso')
+  }
+}
+
+export async function setUserEmail(userId: number, email: string): Promise<void> {
+  const normalizedEmail = normalizeEmail(email)
+  ensureValidEmail(normalizedEmail)
+  await assertEmailAvailable(userId, normalizedEmail)
+
   await sql`
     UPDATE users SET email = ${normalizedEmail}, updated_at = NOW() WHERE id = ${userId}
+  `
+}
+
+export async function requestEmailChange(userId: number, newEmail: string): Promise<void> {
+  const normalizedEmail = normalizeEmail(newEmail)
+  ensureValidEmail(normalizedEmail)
+
+  const users = await sql`SELECT email FROM users WHERE id = ${userId}`
+  if (users.length === 0) {
+    throw new Error('Usuario no encontrado')
+  }
+
+  const currentEmail = users[0].email as string | null
+  if (!currentEmail) {
+    throw new Error('Primero tenes que cargar un email')
+  }
+  if (normalizeEmail(currentEmail) === normalizedEmail) {
+    throw new Error('El nuevo email debe ser distinto al actual')
+  }
+
+  await assertEmailAvailable(userId, normalizedEmail)
+
+  const token = generateSessionToken()
+  const tokenHash = await hashToken(token)
+  const expiresAt = new Date(Date.now() + EMAIL_CHANGE_TOKEN_DURATION_HOURS * 60 * 60 * 1000)
+
+  // Send first so we don't orphan tokens when Resend rejects the request.
+  await sendEmailChangeConfirmationEmail(normalizedEmail, buildConfirmEmailChangeUrl(token))
+
+  await sql`
+    UPDATE email_change_tokens
+    SET used_at = NOW()
+    WHERE user_id = ${userId} AND used_at IS NULL
+  `
+
+  await sql`
+    INSERT INTO email_change_tokens (user_id, new_email, token_hash, expires_at)
+    VALUES (${userId}, ${normalizedEmail}, ${tokenHash}, ${expiresAt.toISOString()})
+  `
+}
+
+export async function confirmEmailChange(token: string): Promise<void> {
+  const tokenHash = await hashToken(token)
+
+  const rows = await sql`
+    SELECT id, user_id, new_email
+    FROM email_change_tokens
+    WHERE token_hash = ${tokenHash} AND used_at IS NULL AND expires_at > NOW()
+  `
+  if (rows.length === 0) {
+    throw new Error('El enlace de confirmacion es invalido o expiro')
+  }
+
+  const { id, user_id: userId, new_email: newEmail } = rows[0]
+  const normalizedEmail = normalizeEmail(newEmail as string)
+  ensureValidEmail(normalizedEmail)
+  await assertEmailAvailable(userId as number, normalizedEmail)
+
+  await sql`
+    UPDATE users SET email = ${normalizedEmail}, updated_at = NOW() WHERE id = ${userId}
+  `
+  await sql`UPDATE email_change_tokens SET used_at = NOW() WHERE id = ${id}`
+  await sql`
+    UPDATE email_change_tokens
+    SET used_at = NOW()
+    WHERE user_id = ${userId} AND used_at IS NULL
   `
 }
 

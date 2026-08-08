@@ -11,12 +11,15 @@ import {
   hashPassword,
   verifyPassword,
   setUserEmail,
+  requestEmailChange,
+  confirmEmailChange,
   resetPassword,
   type UserGender,
 } from '@/lib/auth'
 import { sql } from '@/lib/db'
 import { revalidatePath } from 'next/cache'
 import { redirect } from 'next/navigation'
+import { EmailSendError } from '@/lib/email-errors'
 
 type RegistrationGender = 'male' | 'female' | 'other'
 
@@ -218,11 +221,15 @@ export async function updateMyProfile(formData: FormData): Promise<UpdateProfile
   }
 }
 
-type UpdateEmailResult = { success?: true; error?: string }
+type UpdateEmailResult = { success?: true; error?: string; pendingConfirmation?: true }
 
 export async function addEmailToProfile(formData: FormData): Promise<UpdateEmailResult> {
   const session = await getSession()
   if (!session) return { error: 'No autenticado' }
+
+  if (session.email) {
+    return { error: 'Para cambiar tu email, confirmalo desde el correo nuevo' }
+  }
 
   const email = (formData.get('email') as string | null) ?? ''
   if (!email) {
@@ -231,10 +238,57 @@ export async function addEmailToProfile(formData: FormData): Promise<UpdateEmail
 
   try {
     await setUserEmail(session.userId, email.trim())
+    revalidatePath('/dashboard')
     revalidatePath('/dashboard/configuracion')
     return { success: true }
   } catch (error) {
     return { error: error instanceof Error ? error.message : 'Error al guardar el email' }
+  }
+}
+
+export async function requestEmailChangeAction(formData: FormData): Promise<UpdateEmailResult> {
+  const session = await getSession()
+  if (!session) return { error: 'No autenticado' }
+
+  if (!session.email) {
+    return { error: 'Primero tenes que cargar un email' }
+  }
+
+  const newEmail = (formData.get('newEmail') as string | null) ?? ''
+  const confirmEmail = (formData.get('confirmEmail') as string | null) ?? ''
+
+  if (!newEmail || !confirmEmail) {
+    return { error: 'Completa ambos campos de email' }
+  }
+  if (newEmail.trim().toLowerCase() !== confirmEmail.trim().toLowerCase()) {
+    return { error: 'Los emails no coinciden' }
+  }
+
+  try {
+    await requestEmailChange(session.userId, newEmail.trim())
+    return { success: true, pendingConfirmation: true }
+  } catch (error) {
+    if (error instanceof EmailSendError) {
+      return { error: 'No pudimos enviar el email de confirmacion. Intenta de nuevo mas tarde.' }
+    }
+    return { error: error instanceof Error ? error.message : 'Error al solicitar el cambio de email' }
+  }
+}
+
+type ConfirmEmailChangeResult = { success?: true; error?: string }
+
+export async function confirmEmailChangeAction(token: string): Promise<ConfirmEmailChangeResult> {
+  if (!token) {
+    return { error: 'Enlace invalido' }
+  }
+
+  try {
+    await confirmEmailChange(token)
+    revalidatePath('/dashboard')
+    revalidatePath('/dashboard/configuracion')
+    return { success: true }
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : 'Error al confirmar el email' }
   }
 }
 

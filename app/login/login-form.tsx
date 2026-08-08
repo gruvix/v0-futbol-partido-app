@@ -166,6 +166,10 @@ export function LoginForm({ inviteOnly = false }: { inviteOnly?: boolean }): Rea
           </CardDescription>
         </CardHeader>
         <CardContent>
+          <div className="mb-4 rounded-lg border border-border bg-muted/40 p-3 text-sm text-muted-foreground">
+            Estamos migrando al inicio de sesión con email. Si todavía entrás con teléfono, te recomendamos
+            cargar tu email después del login para recuperar tu cuenta si perdés el acceso.
+          </div>
           <form onSubmit={handleSubmit} className="flex flex-col gap-4">
             {/* Login mode toggle */}
             <div className="flex rounded-lg border border-border p-1 bg-muted/30">
@@ -264,12 +268,7 @@ export function LoginForm({ inviteOnly = false }: { inviteOnly?: boolean }): Rea
             )}
 
             <div className="flex flex-col gap-2">
-              <div className="flex items-center justify-between">
-                <Label htmlFor="password">Contraseña</Label>
-                <Link href="/forgot-password" className="text-xs text-primary underline underline-offset-2">
-                  Olvidaste tu contraseña?
-                </Link>
-              </div>
+              <Label htmlFor="password">Contraseña</Label>
               <div className="relative">
                 <Input
                   ref={passwordInputRef}
@@ -298,6 +297,9 @@ export function LoginForm({ inviteOnly = false }: { inviteOnly?: boolean }): Rea
                   )}
                 </button>
               </div>
+              <Link href="/forgot-password" className="text-xs text-primary underline underline-offset-2 w-fit">
+                Olvidaste tu contraseña?
+              </Link>
             </div>
 
             <label className="flex items-center gap-2 text-sm text-muted-foreground select-none">

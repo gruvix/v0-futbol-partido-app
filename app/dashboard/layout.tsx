@@ -5,6 +5,7 @@ import { DashboardNav } from '@/components/dashboard-nav'
 import { ActionLoaderWrapper } from '@/components/action-loader-provider'
 import { RouteLoader } from '@/components/route-loader'
 import { ErrorToastProvider } from '@/components/error-toast-provider'
+import { EmailSetupPrompt } from '@/components/email-setup-prompt'
 import { initializeDatabase } from '@/lib/db'
 
 export default async function DashboardLayout({
@@ -30,6 +31,7 @@ export default async function DashboardLayout({
       <ErrorToastProvider>
         <div className="min-h-screen bg-white/40">
           <RouteLoader />
+          <EmailSetupPrompt userId={session.userId} hasEmail={Boolean(session.email)} />
           <DashboardNav
             userName={session.lastName ? `${session.name} ${session.lastName}` : session.name}
             isAdmin={Boolean(session.admin)}

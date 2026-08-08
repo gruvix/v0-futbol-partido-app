@@ -26,6 +26,10 @@ export function buildInviteUrl(token: string): string {
   return `${getAppUrl()}/registro?token=${encodeURIComponent(token)}`
 }
 
+export function buildConfirmEmailChangeUrl(token: string): string {
+  return `${getAppUrl()}/confirm-email?token=${encodeURIComponent(token)}`
+}
+
 export async function sendPasswordResetEmail(to: string, resetUrl: string): Promise<void> {
   const resend = getResend()
 
@@ -76,6 +80,33 @@ export async function sendInviteEmail(to: string, inviteUrl: string, inviterName
 
   if (error) {
     console.error('[email] Resend invite failed:', error)
+    throw new EmailSendError()
+  }
+}
+
+export async function sendEmailChangeConfirmationEmail(to: string, confirmUrl: string): Promise<void> {
+  const resend = getResend()
+
+  const { error } = await resend.emails.send({
+    from: getFromAddress(),
+    to,
+    subject: 'Confirmar cambio de email - Fulbito',
+    html: `
+      <div style="font-family: sans-serif; max-width: 480px; margin: 0 auto;">
+        <h2>Confirmar cambio de email</h2>
+        <p>Recibimos una solicitud para cambiar el email de tu cuenta en Fulbito.</p>
+        <p>
+          <a href="${confirmUrl}" style="display: inline-block; padding: 10px 20px; background: #16a34a; color: white; text-decoration: none; border-radius: 6px;">
+            Confirmar nuevo email
+          </a>
+        </p>
+        <p>Este enlace expira en 24 horas. Si no pediste este cambio, podés ignorar este correo.</p>
+      </div>
+    `,
+  })
+
+  if (error) {
+    console.error('[email] Resend email change confirmation failed:', error)
     throw new EmailSendError()
   }
 }
