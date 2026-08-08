@@ -7,25 +7,42 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import { requestPasswordResetAction } from '@/app/actions/auth'
 import { LoadingOverlay } from '@/components/football-loader'
+import { useErrorToast } from '@/components/error-toast-provider'
 
 export default function ForgotPasswordPage() {
   const [email, setEmail] = useState('')
   const [loading, setLoading] = useState(false)
   const [sent, setSent] = useState(false)
+  const { showError } = useErrorToast()
 
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault()
     setLoading(true)
 
-    const formData = new FormData()
-    formData.set('email', email.trim())
-    await requestPasswordResetAction(formData)
+    try {
+      const response = await fetch('/api/auth/forgot-password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: email.trim() }),
+      })
 
-    // Always show the same message, regardless of whether the email exists.
-    setSent(true)
-    setLoading(false)
+      if (response.ok) {
+        setSent(true)
+        return
+      }
+
+      if (response.status === 400) {
+        showError('Datos invalidos', 'Ingresa un email valido.')
+        return
+      }
+
+      showError('Error', 'No se pudo enviar el correo. Intenta de nuevo mas tarde.')
+    } catch {
+      showError('Error', 'No se pudo enviar el correo. Intenta de nuevo mas tarde.')
+    } finally {
+      setLoading(false)
+    }
   }
 
   return (

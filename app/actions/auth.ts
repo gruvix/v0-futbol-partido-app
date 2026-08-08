@@ -7,10 +7,10 @@ import {
   destroySession,
   getSession,
   isApprovalRequired,
+  isInviteOnlyRegistration,
   hashPassword,
   verifyPassword,
   setUserEmail,
-  requestPasswordReset,
   resetPassword,
   type UserGender,
 } from '@/lib/auth'
@@ -48,7 +48,8 @@ export async function register(formData: FormData) {
   }
 
   try {
-    const result = await registerUser(name.trim(), lastName.trim(), phoneLast4, email.trim(), password, gender)
+    const inviteToken = (formData.get('inviteToken') as string | null) ?? undefined
+    const result = await registerUser(name.trim(), lastName.trim(), phoneLast4, email.trim(), password, gender, inviteToken)
     
     if (result.pending) {
       return { success: true, pending: true, message: 'Solicitud enviada. Un administrador debe aprobar tu cuenta.' }
@@ -90,25 +91,6 @@ export async function login(formData: FormData) {
   }
 }
 
-type RequestPasswordResetResult = { success: true }
-
-export async function requestPasswordResetAction(formData: FormData): Promise<RequestPasswordResetResult | { error: string }> {
-  const email = (formData.get('email') as string | null) ?? ''
-
-  if (!email) {
-    return { error: 'Ingresa tu email' }
-  }
-
-  try {
-    await requestPasswordReset(email.trim())
-  } catch (error) {
-    console.error('Error requesting password reset:', error)
-    // Fall through: always return success to avoid leaking whether the email exists.
-  }
-
-  return { success: true }
-}
-
 type ResetPasswordResult = { success?: true; error?: string }
 
 export async function resetPasswordAction(formData: FormData): Promise<ResetPasswordResult> {
@@ -148,6 +130,10 @@ export async function getCurrentUser() {
 
 export async function getApprovalRequired() {
   return isApprovalRequired()
+}
+
+export async function getInviteOnlyRegistration() {
+  return isInviteOnlyRegistration()
 }
 
 type UpdateProfileResult = { success?: true; error?: string }

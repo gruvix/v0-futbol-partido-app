@@ -1,21 +1,21 @@
 import { Resend } from 'resend'
+import { EmailSendError } from './email-errors'
 
 function getResend(): Resend {
   const apiKey = process.env.RESEND_API_KEY
   if (!apiKey) {
-    throw new Error(
-      "Missing RESEND_API_KEY env var. Create a .env.local with RESEND_API_KEY='re_...' (Resend API key)"
-    )
+    console.error('[email] Missing RESEND_API_KEY')
+    throw new EmailSendError()
   }
   return new Resend(apiKey)
 }
 
 function getFromAddress(): string {
-  return process.env.EMAIL_FROM || 'Fulbito <onboarding@resend.dev>'
+  return process.env.EMAIL_FROM || 'Fulbito <soporte@barifutbol.com.ar>'
 }
 
 function getAppUrl(): string {
-  return process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'
+  return process.env.NEXT_PUBLIC_APP_URL || 'https://www.barifutbol.com.ar'
 }
 
 export function buildResetPasswordUrl(token: string): string {
@@ -48,7 +48,8 @@ export async function sendPasswordResetEmail(to: string, resetUrl: string): Prom
   })
 
   if (error) {
-    throw new Error(`Error al enviar el correo de recuperacion: ${error.message}`)
+    console.error('[email] Resend password reset failed:', error)
+    throw new EmailSendError()
   }
 }
 
@@ -74,6 +75,7 @@ export async function sendInviteEmail(to: string, inviteUrl: string, inviterName
   })
 
   if (error) {
-    throw new Error(`Error al enviar el correo de invitacion: ${error.message}`)
+    console.error('[email] Resend invite failed:', error)
+    throw new EmailSendError()
   }
 }

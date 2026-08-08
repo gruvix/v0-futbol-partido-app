@@ -1,6 +1,6 @@
 import { redirect } from 'next/navigation'
 
-import { getSession } from '@/lib/auth'
+import { getSession, isInviteOnlyRegistration } from '@/lib/auth'
 import { LoginForm } from './login-form'
 
 export default async function LoginPage(): Promise<React.JSX.Element> {
@@ -11,5 +11,7 @@ export default async function LoginPage(): Promise<React.JSX.Element> {
     redirect('/dashboard')
   }
 
-  return <LoginForm />
+  const inviteOnly = isInviteOnlyRegistration()
+
+  return <LoginForm inviteOnly={inviteOnly} />
 }

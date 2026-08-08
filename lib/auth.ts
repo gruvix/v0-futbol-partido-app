@@ -9,6 +9,9 @@ const RESET_TOKEN_DURATION_MINUTES = 30
 // Set REQUIRE_APPROVAL=true to enable manual approval for new users
 const REQUIRE_APPROVAL = process.env.REQUIRE_APPROVAL === 'true'
 
+// Set INVITE_ONLY_REGISTRATION=true to require an invite token for new signups
+const INVITE_ONLY_REGISTRATION = process.env.INVITE_ONLY_REGISTRATION === 'true'
+
 export type UserGender = 'MALE' | 'FEMALE' | 'OTHER'
 
 export type LoginCredentials =
@@ -126,7 +129,15 @@ export async function registerUser(
   email: string,
   password: string,
   gender: UserGender,
+  inviteToken?: string,
 ) {
+  if (INVITE_ONLY_REGISTRATION) {
+    if (!inviteToken?.trim()) {
+      throw new Error('Se requiere un enlace de invitacion valido para registrarse')
+    }
+    // Full token validation (single-use, expiry) is implemented in lib/invitations.ts (Phase 2).
+  }
+
   const normalizedName = normalizeUserName(name)
   const normalizedLastName = normalizeNamePart(lastName)
   const normalizedEmail = normalizeEmail(email)
@@ -236,6 +247,10 @@ export function isApprovalRequired() {
   return REQUIRE_APPROVAL
 }
 
+export function isInviteOnlyRegistration() {
+  return INVITE_ONLY_REGISTRATION
+}
+
 export async function setUserEmail(userId: number, email: string): Promise<void> {
   const normalizedEmail = normalizeEmail(email)
   ensureValidEmail(normalizedEmail)
@@ -266,12 +281,13 @@ export async function requestPasswordReset(email: string): Promise<void> {
   const tokenHash = await hashToken(token)
   const expiresAt = new Date(Date.now() + RESET_TOKEN_DURATION_MINUTES * 60 * 1000)
 
+  // Send first so we don't orphan tokens when Resend rejects the request.
+  await sendPasswordResetEmail(normalizedEmail, buildResetPasswordUrl(token))
+
   await sql`
     INSERT INTO password_reset_tokens (user_id, token_hash, expires_at)
     VALUES (${userId}, ${tokenHash}, ${expiresAt.toISOString()})
   `
-
-  await sendPasswordResetEmail(normalizedEmail, buildResetPasswordUrl(token))
 }
 
 export async function resetPassword(token: string, newPassword: string): Promise<void> {

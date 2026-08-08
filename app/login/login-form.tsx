@@ -46,9 +46,9 @@ function safeParseCredentials(raw: string | null): RememberedCredentials | null 
   }
 }
 
-export function LoginForm(): React.JSX.Element {
+export function LoginForm({ inviteOnly = false }: { inviteOnly?: boolean }): React.JSX.Element {
   const [loading, setLoading] = useState<boolean>(false)
-  const [mode, setMode] = useState<LoginMode>('phone')
+  const [mode, setMode] = useState<LoginMode>('email')
   const [name, setName] = useState<string>('')
   const [phoneLast4, setPhoneLast4] = useState<string>('')
   const [email, setEmail] = useState<string>('')
@@ -172,22 +172,22 @@ export function LoginForm(): React.JSX.Element {
               <button
                 type="button"
                 disabled={loading}
-                onClick={() => setMode('phone')}
-                className={`flex-1 rounded-md py-1.5 text-sm font-medium transition-colors ${
-                  mode === 'phone' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground'
-                }`}
-              >
-                Telefono
-              </button>
-              <button
-                type="button"
-                disabled={loading}
                 onClick={() => setMode('email')}
                 className={`flex-1 rounded-md py-1.5 text-sm font-medium transition-colors ${
                   mode === 'email' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground'
                 }`}
               >
                 Email
+              </button>
+              <button
+                type="button"
+                disabled={loading}
+                onClick={() => setMode('phone')}
+                className={`flex-1 rounded-md py-1.5 text-sm font-medium transition-colors ${
+                  mode === 'phone' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground'
+                }`}
+              >
+                Telefono
               </button>
             </div>
 
@@ -318,10 +318,16 @@ export function LoginForm(): React.JSX.Element {
             </Button>
 
             <p className="text-sm text-center text-muted-foreground">
-              No tenes cuenta?{' '}
-              <Link href="/registro" className="text-primary underline underline-offset-2">
-                Registrate
-              </Link>
+              {inviteOnly ? (
+                <>Necesitas una invitacion para crear una cuenta.</>
+              ) : (
+                <>
+                  No tenes cuenta?{' '}
+                  <Link href="/registro" className="text-primary underline underline-offset-2">
+                    Registrate
+                  </Link>
+                </>
+              )}
             </p>
           </form>
         </CardContent>

@@ -1,5 +1,11 @@
 {
   "mcpServers": {
+    "vercel": {
+      "url": "https://mcp.vercel.com"
+    },
+    "resend": {
+      "url": "https://mcp.resend.com/mcp"
+    },
     "postgres-readonly": {
       "command": "npx",
       "args": ["-y", "mcp-postgres-server"],

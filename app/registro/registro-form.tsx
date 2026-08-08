@@ -1,0 +1,242 @@
+'use client'
+
+import React from 'react'
+import { useState } from 'react'
+import { useRouter } from 'next/navigation'
+import Link from 'next/link'
+import { Eye, EyeOff } from 'lucide-react'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { register } from '@/app/actions/auth'
+import { LoadingOverlay } from '@/components/football-loader'
+import { useErrorToast } from '@/components/error-toast-provider'
+
+type RegistroFormProps = {
+  inviteOnly: boolean
+  inviteToken: string
+}
+
+export function RegistroForm({ inviteOnly, inviteToken }: RegistroFormProps) {
+  const [success, setSuccess] = useState('')
+  const [loading, setLoading] = useState(false)
+  const [showPassword, setShowPassword] = useState<boolean>(false)
+  const router = useRouter()
+  const { showError } = useErrorToast()
+
+  function setAlnumCustomValidity(input: HTMLInputElement): void {
+    if (!input.value) {
+      input.setCustomValidity('')
+      return
+    }
+    input.setCustomValidity(/^[a-z0-9]+$/i.test(input.value) ? '' : 'Solo letras y numeros (sin espacios ni simbolos)')
+  }
+
+  async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault()
+    setSuccess('')
+    setLoading(true)
+
+    const formData = new FormData(e.currentTarget)
+    const rawName = (formData.get('name') as string | null) ?? ''
+    formData.set('name', rawName.trim().toLowerCase())
+    if (inviteToken) {
+      formData.set('inviteToken', inviteToken)
+    }
+    const result = await register(formData)
+
+    if (result?.error) {
+      showError('Error al crear cuenta', result.error)
+      setLoading(false)
+    } else if (result?.success) {
+      if (result.pending) {
+        setSuccess(result.message || 'Solicitud enviada')
+        setLoading(false)
+      } else if (result.redirect) {
+        router.push(result.redirect)
+        router.refresh()
+      }
+    }
+  }
+
+  if (inviteOnly && !inviteToken) {
+    return (
+      <main className="min-h-screen flex items-center justify-center bg-white/40 p-4">
+        <Card className="w-full max-w-md">
+          <CardHeader className="text-center">
+            <CardTitle className="text-2xl font-bold text-foreground">Registro cerrado</CardTitle>
+            <CardDescription className="text-muted-foreground">
+              Necesitas un enlace de invitacion para crear una cuenta.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <Link href="/login">
+              <Button variant="outline" className="w-full bg-transparent">
+                Volver al login
+              </Button>
+            </Link>
+          </CardContent>
+        </Card>
+      </main>
+    )
+  }
+
+  return (
+    <main className="min-h-screen flex items-center justify-center bg-white/40 p-4">
+      {loading && !success && <LoadingOverlay message="Creando cuenta..." />}
+      <Card className="w-full max-w-md">
+        <CardHeader className="text-center">
+          <CardTitle className="text-2xl font-bold text-foreground">Registrate</CardTitle>
+          <CardDescription className="text-muted-foreground">
+            Crea tu cuenta para organizar partidos
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          {success ? (
+            <div className="flex flex-col gap-4 text-center">
+              <div className="rounded-lg bg-primary/10 p-4">
+                <p className="text-foreground font-medium">{success}</p>
+              </div>
+              <Link href="/login">
+                <Button variant="outline" className="w-full bg-transparent">
+                  Volver al login
+                </Button>
+              </Link>
+            </div>
+          ) : (
+            <form onSubmit={handleSubmit} className="flex flex-col gap-4">
+              {inviteToken ? <input type="hidden" name="inviteToken" value={inviteToken} /> : null}
+
+              <div className="flex flex-col gap-2">
+                <Label htmlFor="name">Nombre</Label>
+                <Input
+                  id="name"
+                  name="name"
+                  type="text"
+                  placeholder="Tu nombre"
+                  required
+                  autoComplete="name"
+                  disabled={loading}
+                  pattern="[A-Za-z0-9]+"
+                  onInvalid={(e) => setAlnumCustomValidity(e.currentTarget)}
+                  onInput={(e) => setAlnumCustomValidity(e.currentTarget)}
+                />
+              </div>
+
+              <div className="flex flex-col gap-2">
+                <Label htmlFor="lastName">Apellido</Label>
+                <Input
+                  id="lastName"
+                  name="lastName"
+                  type="text"
+                  placeholder="Tu apellido"
+                  required
+                  autoComplete="family-name"
+                  disabled={loading}
+                  pattern="[A-Za-z0-9]+"
+                  onInvalid={(e) => setAlnumCustomValidity(e.currentTarget)}
+                  onInput={(e) => setAlnumCustomValidity(e.currentTarget)}
+                />
+              </div>
+
+              <div className="flex flex-col gap-2">
+                <Label htmlFor="phoneLast4">Ultimos 4 digitos del celular</Label>
+                <Input
+                  id="phoneLast4"
+                  name="phoneLast4"
+                  type="text"
+                  inputMode="numeric"
+                  pattern="\d{4}"
+                  maxLength={4}
+                  placeholder="1234"
+                  required
+                  disabled={loading}
+                />
+                <p className="text-xs text-muted-foreground">
+                  Tu nombre + estos 4 digitos te identifican
+                </p>
+              </div>
+
+              <div className="flex flex-col gap-2">
+                <Label htmlFor="email">Email</Label>
+                <Input
+                  id="email"
+                  name="email"
+                  type="email"
+                  placeholder="tu@email.com"
+                  required
+                  autoComplete="email"
+                  disabled={loading}
+                />
+                <p className="text-xs text-muted-foreground">
+                  Lo usamos para recuperar tu cuenta y podes usarlo para iniciar sesion
+                </p>
+              </div>
+
+              <div className="flex flex-col gap-2">
+                <Label htmlFor="password">Contraseña</Label>
+                <div className="relative">
+                  <Input
+                    id="password"
+                    name="password"
+                    type={showPassword ? 'text' : 'password'}
+                    placeholder="Minimo 8 caracteres"
+                    required
+                    minLength={8}
+                    autoComplete="new-password"
+                    disabled={loading}
+                    className="pr-10"
+                  />
+                  <button
+                    type="button"
+                    className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground disabled:opacity-50"
+                    onClick={() => setShowPassword((prev) => !prev)}
+                    disabled={loading}
+                    aria-label={showPassword ? 'Ocultar contraseña' : 'Mostrar contraseña'}
+                  >
+                    {showPassword ? (
+                      <EyeOff className="h-4 w-4" aria-hidden="true" />
+                    ) : (
+                      <Eye className="h-4 w-4" aria-hidden="true" />
+                    )}
+                  </button>
+                </div>
+                <p className="text-xs text-muted-foreground">Debe tener al menos 8 caracteres</p>
+              </div>
+
+              <div className="flex flex-col gap-2">
+                <Label>Genero</Label>
+                <div className="flex flex-col gap-2">
+                  <label className="flex items-center gap-2 p-2 rounded-lg border border-border hover:bg-muted/50 transition-colors cursor-pointer">
+                    <input type="radio" name="gender" value="male" defaultChecked disabled={loading} />
+                    <span className="text-sm text-foreground">Masculino</span>
+                  </label>
+                  <label className="flex items-center gap-2 p-2 rounded-lg border border-border hover:bg-muted/50 transition-colors cursor-pointer">
+                    <input type="radio" name="gender" value="female" disabled={loading} />
+                    <span className="text-sm text-foreground">Femenino</span>
+                  </label>
+                  <label className="flex items-center gap-2 p-2 rounded-lg border border-border hover:bg-muted/50 transition-colors cursor-pointer">
+                    <input type="radio" name="gender" value="other" disabled={loading} />
+                    <span className="text-sm text-foreground">Otro / no binario</span>
+                  </label>
+                </div>
+              </div>
+
+              <Button type="submit" className="w-full" disabled={loading}>
+                Crear cuenta
+              </Button>
+
+              <p className="text-sm text-center text-muted-foreground">
+                Ya tenes cuenta?{' '}
+                <Link href="/login" className="text-primary underline underline-offset-2">
+                  Inicia sesion
+                </Link>
+              </p>
+            </form>
+          )}
+        </CardContent>
+      </Card>
+    </main>
+  )
+}
