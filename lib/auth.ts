@@ -146,7 +146,7 @@ export async function registerUser(
   const normalizedEmail = normalizeEmail(email)
 
   if (INVITE_ONLY_REGISTRATION) {
-    registrationInviteId = await validateRegistrationInvite(inviteToken!.trim(), normalizedEmail)
+    registrationInviteId = await validateRegistrationInvite(inviteToken!.trim())
   }
 
   if (!normalizedLastName) {

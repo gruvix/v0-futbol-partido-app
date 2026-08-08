@@ -1,7 +1,7 @@
 // Service Worker for Push Notifications
 
 self.addEventListener('push', (event) => {
-  const defaultData = { title: 'Fulbito', body: 'Tenés una nueva notificación' }
+  const defaultData = { title: 'BariFutbol', body: 'Tenés una nueva notificación' }
 
   let data = defaultData
   try {

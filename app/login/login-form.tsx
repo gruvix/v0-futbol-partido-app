@@ -160,7 +160,7 @@ export function LoginForm({ inviteOnly = false }: { inviteOnly?: boolean }): Rea
       {loading && <LoadingOverlay message="Iniciando sesion..." />}
       <Card className="w-full max-w-md">
         <CardHeader className="text-center">
-          <CardTitle className="text-2xl font-bold text-foreground">Fulbito</CardTitle>
+          <CardTitle className="text-2xl font-bold text-foreground">BariFutbol</CardTitle>
           <CardDescription className="text-muted-foreground">
             Organiza partidos con tus amigos
           </CardDescription>

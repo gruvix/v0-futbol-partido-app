@@ -10,7 +10,7 @@ const _geist = Geist({ subsets: ["latin"] });
 const _geistMono = Geist_Mono({ subsets: ["latin"] });
 
 export const metadata: Metadata = {
-  title: "Fulbito - Organiza tus partidos",
+  title: "BariFutbol - Organiza tus partidos",
   description: "Organizador de partidos de futbol entre amigos",
   generator: "v0.app",
 };

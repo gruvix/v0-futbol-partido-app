@@ -11,7 +11,7 @@ function getResend(): Resend {
 }
 
 function getFromAddress(): string {
-  return process.env.EMAIL_FROM || 'Fulbito <soporte@barifutbol.com.ar>'
+  return process.env.EMAIL_FROM || 'BariFutbol <soporte@barifutbol.com.ar>'
 }
 
 function getAppUrl(): string {
@@ -36,11 +36,11 @@ export async function sendPasswordResetEmail(to: string, resetUrl: string): Prom
   const { error } = await resend.emails.send({
     from: getFromAddress(),
     to,
-    subject: 'Recuperar tu contraseña - Fulbito',
+    subject: 'Recuperar tu contraseña - BariFutbol',
     html: `
       <div style="font-family: sans-serif; max-width: 480px; margin: 0 auto;">
         <h2>Recuperar tu contraseña</h2>
-        <p>Recibimos una solicitud para restablecer tu contraseña en Fulbito.</p>
+        <p>Recibimos una solicitud para restablecer tu contraseña en BariFutbol.</p>
         <p>
           <a href="${resetUrl}" style="display: inline-block; padding: 10px 20px; background: #16a34a; color: white; text-decoration: none; border-radius: 6px;">
             Restablecer contraseña
@@ -63,11 +63,11 @@ export async function sendInviteEmail(to: string, inviteUrl: string, inviterName
   const { error } = await resend.emails.send({
     from: getFromAddress(),
     to,
-    subject: `${inviterName} te invito a Fulbito`,
+    subject: `${inviterName} te invito a BariFutbol`,
     html: `
       <div style="font-family: sans-serif; max-width: 480px; margin: 0 auto;">
-        <h2>${inviterName} te invito a Fulbito</h2>
-        <p>Fulbito es una app para organizar partidos de futbol con amigos.</p>
+        <h2>${inviterName} te invito a BariFutbol</h2>
+        <p>BariFutbol es una app para organizar partidos de futbol con amigos.</p>
         <p>
           <a href="${inviteUrl}" style="display: inline-block; padding: 10px 20px; background: #16a34a; color: white; text-decoration: none; border-radius: 6px;">
             Crear mi cuenta
@@ -90,11 +90,11 @@ export async function sendEmailChangeConfirmationEmail(to: string, confirmUrl: s
   const { error } = await resend.emails.send({
     from: getFromAddress(),
     to,
-    subject: 'Confirmar cambio de email - Fulbito',
+    subject: 'Confirmar cambio de email - BariFutbol',
     html: `
       <div style="font-family: sans-serif; max-width: 480px; margin: 0 auto;">
         <h2>Confirmar cambio de email</h2>
-        <p>Recibimos una solicitud para cambiar el email de tu cuenta en Fulbito.</p>
+        <p>Recibimos una solicitud para cambiar el email de tu cuenta en BariFutbol.</p>
         <p>
           <a href="${confirmUrl}" style="display: inline-block; padding: 10px 20px; background: #16a34a; color: white; text-decoration: none; border-radius: 6px;">
             Confirmar nuevo email
