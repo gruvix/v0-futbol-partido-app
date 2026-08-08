@@ -1,7 +1,7 @@
 // Service Worker for Push Notifications
 
 self.addEventListener('push', (event) => {
-  const defaultData = { title: 'Fulbito', body: 'Tenés una nueva notificación' }
+  const defaultData = { title: 'BariFutbol', body: 'Tenés una nueva notificación' }
 
   let data = defaultData
   try {
@@ -18,8 +18,8 @@ self.addEventListener('push', (event) => {
   event.waitUntil(
     self.registration.showNotification(data.title, {
       body: data.body,
-      icon: '/icon-dark-32x32.png',
-      badge: '/icon-dark-32x32.png',
+      icon: '/web-app-manifest-192x192.png',
+      badge: '/web-app-manifest-192x192.png',
       data: data.url ? { url: data.url } : undefined,
     })
   )

@@ -1,10 +1,25 @@
 
 'use server'
 
-import { registerUser, loginUser, destroySession, getSession, isApprovalRequired, hashPassword, verifyPassword, type UserGender } from '@/lib/auth'
+import {
+  registerUser,
+  loginUser,
+  destroySession,
+  getSession,
+  isApprovalRequired,
+  isInviteOnlyRegistration,
+  hashPassword,
+  verifyPassword,
+  setUserEmail,
+  requestEmailChange,
+  confirmEmailChange,
+  resetPassword,
+  type UserGender,
+} from '@/lib/auth'
 import { sql } from '@/lib/db'
 import { revalidatePath } from 'next/cache'
 import { redirect } from 'next/navigation'
+import { EmailSendError } from '@/lib/email-errors'
 
 type RegistrationGender = 'male' | 'female' | 'other'
 
@@ -19,10 +34,11 @@ export async function register(formData: FormData) {
   const name = formData.get('name') as string
   const lastName = formData.get('lastName') as string
   const phoneLast4 = formData.get('phoneLast4') as string
+  const email = formData.get('email') as string
   const password = formData.get('password') as string
   const gender = parseGender(formData.get('gender'))
 
-  if (!name || !lastName || !phoneLast4 || !password) {
+  if (!name || !lastName || !phoneLast4 || !email || !password) {
     return { error: 'Todos los campos son requeridos' }
   }
 
@@ -35,7 +51,8 @@ export async function register(formData: FormData) {
   }
 
   try {
-    const result = await registerUser(name.trim(), lastName.trim(), phoneLast4, password, gender)
+    const inviteToken = (formData.get('inviteToken') as string | null) ?? undefined
+    const result = await registerUser(name.trim(), lastName.trim(), phoneLast4, email.trim(), password, gender, inviteToken)
     
     if (result.pending) {
       return { success: true, pending: true, message: 'Solicitud enviada. Un administrador debe aprobar tu cuenta.' }
@@ -49,19 +66,59 @@ export async function register(formData: FormData) {
 }
 
 export async function login(formData: FormData) {
-  const name = formData.get('name') as string
-  const phoneLast4 = formData.get('phoneLast4') as string
+  const mode = (formData.get('mode') as string) === 'email' ? 'email' : 'phone'
   const password = formData.get('password') as string
 
-  if (!name || !phoneLast4 || !password) {
+  if (!password) {
     return { error: 'Todos los campos son requeridos' }
   }
 
   try {
-    await loginUser(name.trim(), phoneLast4, password)
+    if (mode === 'email') {
+      const email = formData.get('email') as string
+      if (!email) {
+        return { error: 'Todos los campos son requeridos' }
+      }
+      await loginUser({ mode: 'email', email: email.trim(), password })
+    } else {
+      const name = formData.get('name') as string
+      const phoneLast4 = formData.get('phoneLast4') as string
+      if (!name || !phoneLast4) {
+        return { error: 'Todos los campos son requeridos' }
+      }
+      await loginUser({ mode: 'phone', name: name.trim(), phoneLast4, password })
+    }
     return { success: true, redirect: '/dashboard' }
   } catch (error) {
     return { error: error instanceof Error ? error.message : 'Error al iniciar sesion' }
+  }
+}
+
+type ResetPasswordResult = { success?: true; error?: string }
+
+export async function resetPasswordAction(formData: FormData): Promise<ResetPasswordResult> {
+  const token = (formData.get('token') as string | null) ?? ''
+  const newPassword = (formData.get('newPassword') as string | null) ?? ''
+  const newPasswordRepeat = (formData.get('newPasswordRepeat') as string | null) ?? ''
+
+  if (!token) {
+    return { error: 'Enlace invalido' }
+  }
+  if (!newPassword || !newPasswordRepeat) {
+    return { error: 'Todos los campos son requeridos' }
+  }
+  if (newPassword.length < 8) {
+    return { error: 'La contraseña debe tener al menos 8 caracteres' }
+  }
+  if (newPassword !== newPasswordRepeat) {
+    return { error: 'Las contraseñas no coinciden' }
+  }
+
+  try {
+    await resetPassword(token, newPassword)
+    return { success: true }
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : 'Error al restablecer la contraseña' }
   }
 }
 
@@ -76,6 +133,10 @@ export async function getCurrentUser() {
 
 export async function getApprovalRequired() {
   return isApprovalRequired()
+}
+
+export async function getInviteOnlyRegistration() {
+  return isInviteOnlyRegistration()
 }
 
 type UpdateProfileResult = { success?: true; error?: string }
@@ -157,6 +218,77 @@ export async function updateMyProfile(formData: FormData): Promise<UpdateProfile
     return { success: true }
   } catch (error) {
     return { error: error instanceof Error ? error.message : 'Error al actualizar perfil' }
+  }
+}
+
+type UpdateEmailResult = { success?: true; error?: string; pendingConfirmation?: true }
+
+export async function addEmailToProfile(formData: FormData): Promise<UpdateEmailResult> {
+  const session = await getSession()
+  if (!session) return { error: 'No autenticado' }
+
+  if (session.email) {
+    return { error: 'Para cambiar tu email, confirmalo desde el correo nuevo' }
+  }
+
+  const email = (formData.get('email') as string | null) ?? ''
+  if (!email) {
+    return { error: 'Ingresa un email' }
+  }
+
+  try {
+    await setUserEmail(session.userId, email.trim())
+    revalidatePath('/dashboard')
+    revalidatePath('/dashboard/configuracion')
+    return { success: true }
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : 'Error al guardar el email' }
+  }
+}
+
+export async function requestEmailChangeAction(formData: FormData): Promise<UpdateEmailResult> {
+  const session = await getSession()
+  if (!session) return { error: 'No autenticado' }
+
+  if (!session.email) {
+    return { error: 'Primero tenes que cargar un email' }
+  }
+
+  const newEmail = (formData.get('newEmail') as string | null) ?? ''
+  const confirmEmail = (formData.get('confirmEmail') as string | null) ?? ''
+
+  if (!newEmail || !confirmEmail) {
+    return { error: 'Completa ambos campos de email' }
+  }
+  if (newEmail.trim().toLowerCase() !== confirmEmail.trim().toLowerCase()) {
+    return { error: 'Los emails no coinciden' }
+  }
+
+  try {
+    await requestEmailChange(session.userId, newEmail.trim())
+    return { success: true, pendingConfirmation: true }
+  } catch (error) {
+    if (error instanceof EmailSendError) {
+      return { error: 'No pudimos enviar el email de confirmacion. Intenta de nuevo mas tarde.' }
+    }
+    return { error: error instanceof Error ? error.message : 'Error al solicitar el cambio de email' }
+  }
+}
+
+type ConfirmEmailChangeResult = { success?: true; error?: string }
+
+export async function confirmEmailChangeAction(token: string): Promise<ConfirmEmailChangeResult> {
+  if (!token) {
+    return { error: 'Enlace invalido' }
+  }
+
+  try {
+    await confirmEmailChange(token)
+    revalidatePath('/dashboard')
+    revalidatePath('/dashboard/configuracion')
+    return { success: true }
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : 'Error al confirmar el email' }
   }
 }
 
