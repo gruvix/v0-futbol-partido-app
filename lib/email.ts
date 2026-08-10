@@ -46,7 +46,7 @@ export async function sendPasswordResetEmail(to: string, resetUrl: string): Prom
             Restablecer contraseña
           </a>
         </p>
-        <p>Este enlace expira en 30 minutos. Si no pediste este cambio, podés ignorar este correo.</p>
+        <p>Este enlace expira en 12 horas. Si no pediste este cambio, podés ignorar este correo.</p>
       </div>
     `,
   })

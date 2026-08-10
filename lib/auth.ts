@@ -5,7 +5,7 @@ import { sendPasswordResetEmail, buildResetPasswordUrl, sendEmailChangeConfirmat
 import { validateRegistrationInvite, consumeRegistrationInvite } from './invitations'
 
 const SESSION_DURATION_DAYS = 30
-const RESET_TOKEN_DURATION_MINUTES = 30
+const RESET_TOKEN_DURATION_HOURS = 12
 const EMAIL_CHANGE_TOKEN_DURATION_HOURS = 24
 
 // Set REQUIRE_APPROVAL=true to enable manual approval for new users
@@ -394,7 +394,7 @@ export async function requestPasswordReset(email: string): Promise<void> {
   const userId = users[0].id
   const token = generateSessionToken()
   const tokenHash = await hashToken(token)
-  const expiresAt = new Date(Date.now() + RESET_TOKEN_DURATION_MINUTES * 60 * 1000)
+  const expiresAt = new Date(Date.now() + RESET_TOKEN_DURATION_HOURS * 60 * 60 * 1000)
 
   await sql`
     UPDATE password_reset_tokens
