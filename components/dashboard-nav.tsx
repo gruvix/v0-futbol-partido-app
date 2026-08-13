@@ -22,6 +22,7 @@ import {
   Settings,
   Menu,
   UserPlus,
+  Download,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { LoadingOverlay } from '@/components/football-loader'
@@ -139,6 +140,20 @@ export function DashboardNav({ userName, isAdmin }: DashboardNavProps) {
                   <Link href="/dashboard/invitar" prefetch={true} className="gap-3.5 cursor-pointer">
                     <UserPlus className="w-7 h-7" />
                     Invitar usuario
+                  </Link>
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem asChild>
+                  <Link
+                    href="/dashboard/descargar-app"
+                    prefetch={true}
+                    className={cn(
+                      'gap-3.5 cursor-pointer',
+                      pathname === '/dashboard/descargar-app' && 'bg-accent',
+                    )}
+                  >
+                    <Download className="w-7 h-7" />
+                    Descargar app
                   </Link>
                 </DropdownMenuItem>
               </DropdownMenuContent>
