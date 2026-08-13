@@ -3,6 +3,7 @@ import React from "react";
 import type { Metadata } from "next";
 import { Analytics } from "@vercel/analytics/next";
 import { ErrorToastProvider } from "@/components/error-toast-provider";
+import { PwaInstallListener } from "@/components/pwa-install-listener";
 import "./globals.css";
 import "../loader.css";
 
@@ -27,6 +28,7 @@ export default function RootLayout({
       >
         <div className='bg-white/20'>
 
+        <PwaInstallListener />
         <ErrorToastProvider>{children}</ErrorToastProvider>
         <Analytics />
         </div>
