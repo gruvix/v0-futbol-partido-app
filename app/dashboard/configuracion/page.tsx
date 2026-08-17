@@ -3,7 +3,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { ArrowLeft, Save, Settings, LockKeyhole, Bell, Mail, ChevronDown, User } from 'lucide-react'
+import { ArrowLeft, Save, Settings, LockKeyhole, Bell, Mail, ChevronDown, User, Loader2 } from 'lucide-react'
 
 import { getCurrentUser, updateMyProfile, changeMyPassword, addEmailToProfile, requestEmailChangeAction } from '@/app/actions/auth'
 import {
@@ -12,7 +12,8 @@ import {
   deletePushSubscription,
   type PushNotificationsSettings,
 } from '@/app/actions/notifications'
-import { syncPushSubscription } from '@/lib/push-client'
+import { syncPushSubscription, isAnyPushSettingEnabled } from '@/lib/push-client'
+import { cn } from '@/lib/utils'
 import { savePixelAvatar, getMyPixelAvatar } from '@/app/actions/avatar'
 import { useErrorToast } from '@/components/error-toast-provider'
 import { PixelAvatarEditor } from '@/components/pixel-avatar-editor'
@@ -47,6 +48,71 @@ function setAlnumCustomValidity(input: HTMLInputElement, label: string): void {
 }
 
 type SectionId = 'perfil' | 'avatar' | 'email' | 'password' | 'notifications'
+
+type NotificationFieldKey =
+  | 'master'
+  | 'newMatch'
+  | 'matchCancelled'
+  | 'matchFilled'
+  | 'matchChanges'
+  | 'cancellation'
+  | 'reminder'
+  | 'reminderTime'
+
+function AnimatedCollapse({
+  open,
+  children,
+}: {
+  open: boolean
+  children: React.ReactNode
+}): React.JSX.Element {
+  return (
+    <div
+      className={cn(
+        'grid transition-[grid-template-rows] duration-300 ease-in-out',
+        open ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]',
+      )}
+    >
+      <div className="overflow-hidden">{children}</div>
+    </div>
+  )
+}
+
+function NotificationSwitchRow({
+  id,
+  label,
+  description,
+  checked,
+  disabled,
+  saving,
+  onCheckedChange,
+}: {
+  id: string
+  label: string
+  description: string
+  checked: boolean
+  disabled: boolean
+  saving: boolean
+  onCheckedChange: (checked: boolean) => void
+}): React.JSX.Element {
+  return (
+    <div className="flex items-center justify-between gap-4">
+      <div className="flex flex-col gap-0.5">
+        <Label htmlFor={id}>{label}</Label>
+        <p className="text-xs text-muted-foreground">{description}</p>
+      </div>
+      <div className="flex items-center gap-2 shrink-0">
+        {saving && <Loader2 className="w-3.5 h-3.5 animate-spin text-muted-foreground" aria-hidden="true" />}
+        <Switch
+          id={id}
+          disabled={disabled || saving}
+          checked={checked}
+          onCheckedChange={onCheckedChange}
+        />
+      </div>
+    </div>
+  )
+}
 
 type SettingsSectionProps = {
   id: SectionId
@@ -92,13 +158,18 @@ function SettingsSection({
             {title}
           </CardTitle>
           <ChevronDown
-            className={`w-4 h-4 text-muted-foreground transition-transform shrink-0 ${isOpen ? 'rotate-180' : ''}`}
+            className={cn(
+              'w-4 h-4 text-muted-foreground shrink-0 transition-transform duration-300 ease-in-out',
+              isOpen && 'rotate-180',
+            )}
           />
         </div>
         {description && <CardDescription className="text-muted-foreground">{description}</CardDescription>}
         {extra}
       </CardHeader>
-      {isOpen && <CardContent>{children}</CardContent>}
+      <AnimatedCollapse open={isOpen}>
+        <CardContent>{children}</CardContent>
+      </AnimatedCollapse>
     </Card>
   )
 }
@@ -112,7 +183,7 @@ export default function ConfiguracionPage(): React.JSX.Element {
   const [savingProfile, setSavingProfile] = useState<boolean>(false)
   const [savingPassword, setSavingPassword] = useState<boolean>(false)
   const [savingEmail, setSavingEmail] = useState<boolean>(false)
-  const [savingNotifications, setSavingNotifications] = useState<boolean>(false)
+  const [savingNotificationKey, setSavingNotificationKey] = useState<NotificationFieldKey | null>(null)
   const [savingAvatar, setSavingAvatar] = useState<boolean>(false)
   const [avatarData, setAvatarData] = useState<string | null>(null)
   const [email, setEmail] = useState<string>('')
@@ -150,6 +221,7 @@ export default function ConfiguracionPage(): React.JSX.Element {
   const [requestingPermission, setRequestingPermission] = useState<boolean>(false)
   const [pushJustActivated, setPushJustActivated] = useState<boolean>(false)
   const swRegistrationRef = useRef<ServiceWorkerRegistration | null>(null)
+  const reminderTimeDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   // Register service worker on mount and track permission status
   useEffect(() => {
@@ -248,6 +320,12 @@ export default function ConfiguracionPage(): React.JSX.Element {
       })
   }, [router, showError])
 
+  useEffect(() => {
+    return () => {
+      if (reminderTimeDebounceRef.current) clearTimeout(reminderTimeDebounceRef.current)
+    }
+  }, [])
+
   const anyNotificationEnabled = useMemo(
     () =>
       notifications.newMatch ||
@@ -260,15 +338,86 @@ export default function ConfiguracionPage(): React.JSX.Element {
   )
 
   function handleToggleAllNotifications(enabled: boolean): void {
-    setNotifications((n) => ({
-      ...n,
+    const next: PushNotificationsSettings = {
+      ...notifications,
       newMatch: enabled,
       matchCancelled: enabled,
       matchFilled: enabled,
       matchChanges: enabled,
       cancellation: enabled,
       reminder: enabled,
-    }))
+    }
+    setNotifications(next)
+    void persistNotificationSettings(next, 'master')
+  }
+
+  async function persistNotificationSettings(
+    settings: PushNotificationsSettings,
+    savingKey: NotificationFieldKey,
+  ): Promise<boolean> {
+    const anyEnabled = isAnyPushSettingEnabled(settings)
+
+    setSavingNotificationKey(savingKey)
+    try {
+      if (anyEnabled && pushPermission !== 'unsupported') {
+        const ok = await subscribeToPush()
+        if (!ok) {
+          const fresh = await getPushNotificationsSettings()
+          if (fresh) setNotifications(fresh)
+          return false
+        }
+      }
+
+      if (!anyEnabled && pushPermission !== 'unsupported') {
+        await unsubscribeFromPush()
+      }
+
+      const fd = new FormData()
+      fd.set('newMatch', String(settings.newMatch))
+      fd.set('matchCancelled', String(settings.matchCancelled))
+      fd.set('matchFilled', String(settings.matchFilled))
+      fd.set('matchChanges', String(settings.matchChanges))
+      fd.set('cancellation', String(settings.cancellation))
+      fd.set('reminder', String(settings.reminder))
+      fd.set('reminderTime', String(settings.reminderTime))
+
+      const result = await updatePushNotificationsSettings(fd)
+      if (result?.error) {
+        showError('Error al guardar notificaciones', result.error)
+        const fresh = await getPushNotificationsSettings()
+        if (fresh) setNotifications(fresh)
+        return false
+      }
+      return true
+    } catch (e: unknown) {
+      console.error(e)
+      showError('Error al guardar notificaciones')
+      const fresh = await getPushNotificationsSettings()
+      if (fresh) setNotifications(fresh)
+      return false
+    } finally {
+      setSavingNotificationKey(null)
+    }
+  }
+
+  function handleNotificationFieldChange(
+    key: keyof PushNotificationsSettings,
+    value: boolean,
+    fieldKey: NotificationFieldKey,
+  ): void {
+    const next = { ...notifications, [key]: value }
+    setNotifications(next)
+    void persistNotificationSettings(next, fieldKey)
+  }
+
+  function handleReminderTimeChange(value: number): void {
+    const next = { ...notifications, reminderTime: value }
+    setNotifications(next)
+
+    if (reminderTimeDebounceRef.current) clearTimeout(reminderTimeDebounceRef.current)
+    reminderTimeDebounceRef.current = setTimeout(() => {
+      void persistNotificationSettings(next, 'reminderTime')
+    }, 500)
   }
 
   const profileDirty = useMemo(() => {
@@ -391,47 +540,6 @@ export default function ConfiguracionPage(): React.JSX.Element {
       showError('Error al cambiar contraseña')
     } finally {
       setSavingPassword(false)
-    }
-  }
-
-  async function handleSaveNotifications(e: React.FormEvent<HTMLFormElement>): Promise<void> {
-    e.preventDefault()
-    setSavingNotifications(true)
-    try {
-      // If any notification is enabled, request permission + subscribe
-      if (anyNotificationEnabled && pushPermission !== 'unsupported') {
-        const ok = await subscribeToPush()
-        if (!ok) {
-          // Permission denied or subscription failed — don't save settings
-          setSavingNotifications(false)
-          return
-        }
-      }
-
-      // If all notifications disabled, unsubscribe
-      if (!anyNotificationEnabled && pushPermission !== 'unsupported') {
-        await unsubscribeFromPush()
-      }
-
-      const fd = new FormData()
-      fd.set('newMatch', String(notifications.newMatch))
-      fd.set('matchCancelled', String(notifications.matchCancelled))
-      fd.set('matchFilled', String(notifications.matchFilled))
-      fd.set('matchChanges', String(notifications.matchChanges))
-      fd.set('cancellation', String(notifications.cancellation))
-      fd.set('reminder', String(notifications.reminder))
-      fd.set('reminderTime', String(notifications.reminderTime))
-
-      const result = await updatePushNotificationsSettings(fd)
-      if (result?.error) {
-        showError('Error al guardar notificaciones', result.error)
-        return
-      }
-    } catch (e: unknown) {
-      console.error(e)
-      showError('Error al guardar notificaciones')
-    } finally {
-      setSavingNotifications(false)
     }
   }
 
@@ -796,21 +904,16 @@ export default function ConfiguracionPage(): React.JSX.Element {
           </>
         }
       >
-          <form onSubmit={handleSaveNotifications} className="flex flex-col gap-4">
-            <div className="flex items-center justify-between gap-4">
-              <div className="flex flex-col gap-0.5">
-                <Label htmlFor="notif-master">Notificaciones</Label>
-                <p className="text-xs text-muted-foreground">
-                  {anyNotificationEnabled ? 'Vas a recibir avisos de tus partidos' : 'No vas a recibir avisos'}
-                </p>
-              </div>
-              <Switch
-                id="notif-master"
-                disabled={loadingUser || savingNotifications}
-                checked={anyNotificationEnabled}
-                onCheckedChange={(v) => handleToggleAllNotifications(v)}
-              />
-            </div>
+          <div className="flex flex-col gap-4">
+            <NotificationSwitchRow
+              id="notif-master"
+              label="Notificaciones"
+              description={anyNotificationEnabled ? 'Vas a recibir avisos de tus partidos' : 'No vas a recibir avisos'}
+              checked={anyNotificationEnabled}
+              disabled={loadingUser}
+              saving={savingNotificationKey === 'master'}
+              onCheckedChange={handleToggleAllNotifications}
+            />
 
             {anyNotificationEnabled && (
               <button
@@ -818,118 +921,115 @@ export default function ConfiguracionPage(): React.JSX.Element {
                 className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors w-fit"
                 onClick={() => setShowAdvancedNotifications((v) => !v)}
               >
-                <ChevronDown className={`w-3.5 h-3.5 transition-transform ${showAdvancedNotifications ? 'rotate-180' : ''}`} />
+                <ChevronDown
+                  className={cn(
+                    'w-3.5 h-3.5 transition-transform duration-300 ease-in-out',
+                    showAdvancedNotifications && 'rotate-180',
+                  )}
+                />
                 {showAdvancedNotifications ? 'Ocultar tipos de notificación' : 'Elegir qué notificaciones recibir'}
               </button>
             )}
 
-            {anyNotificationEnabled && showAdvancedNotifications && (
-              <div className="flex flex-col gap-4 pl-1 border-l-2 border-border ml-1">
-                <div className="flex items-center justify-between gap-4 pl-3">
-                  <div className="flex flex-col gap-0.5">
-                    <Label htmlFor="notif-new-match">Nuevo partido creado</Label>
-                    <p className="text-xs text-muted-foreground">Cuando se crea un nuevo partido</p>
-                  </div>
-                  <Switch
+            <AnimatedCollapse open={anyNotificationEnabled && showAdvancedNotifications}>
+              <div className="flex flex-col gap-4 pl-1 border-l-2 border-border ml-1 pt-4">
+                <div className="pl-3">
+                  <NotificationSwitchRow
                     id="notif-new-match"
-                    disabled={loadingUser || savingNotifications}
+                    label="Nuevo partido creado"
+                    description="Cuando se crea un nuevo partido"
                     checked={notifications.newMatch}
-                    onCheckedChange={(v) => setNotifications((n) => ({ ...n, newMatch: v }))}
+                    disabled={loadingUser}
+                    saving={savingNotificationKey === 'newMatch'}
+                    onCheckedChange={(v) => handleNotificationFieldChange('newMatch', v, 'newMatch')}
                   />
                 </div>
 
-                <div className="flex items-center justify-between gap-4 pl-3">
-                  <div className="flex flex-col gap-0.5">
-                    <Label htmlFor="notif-match-cancelled">Partido cancelado</Label>
-                    <p className="text-xs text-muted-foreground">Cuando se cancela un partido</p>
-                  </div>
-                  <Switch
+                <div className="pl-3">
+                  <NotificationSwitchRow
                     id="notif-match-cancelled"
-                    disabled={loadingUser || savingNotifications}
+                    label="Partido cancelado"
+                    description="Cuando se cancela un partido"
                     checked={notifications.matchCancelled}
-                    onCheckedChange={(v) => setNotifications((n) => ({ ...n, matchCancelled: v }))}
+                    disabled={loadingUser}
+                    saving={savingNotificationKey === 'matchCancelled'}
+                    onCheckedChange={(v) => handleNotificationFieldChange('matchCancelled', v, 'matchCancelled')}
                   />
                 </div>
 
-                <div className="flex items-center justify-between gap-4 pl-3">
-                  <div className="flex flex-col gap-0.5">
-                    <Label htmlFor="notif-match-filled">Partido lleno</Label>
-                    <p className="text-xs text-muted-foreground">Cuando se completan los cupos de un partido</p>
-                  </div>
-                  <Switch
+                <div className="pl-3">
+                  <NotificationSwitchRow
                     id="notif-match-filled"
-                    disabled={loadingUser || savingNotifications}
+                    label="Partido lleno"
+                    description="Cuando se completan los cupos de un partido"
                     checked={notifications.matchFilled}
-                    onCheckedChange={(v) => setNotifications((n) => ({ ...n, matchFilled: v }))}
+                    disabled={loadingUser}
+                    saving={savingNotificationKey === 'matchFilled'}
+                    onCheckedChange={(v) => handleNotificationFieldChange('matchFilled', v, 'matchFilled')}
                   />
                 </div>
 
-                <div className="flex items-center justify-between gap-4 pl-3">
-                  <div className="flex flex-col gap-0.5">
-                    <Label htmlFor="notif-match-changes">Cambios en el partido</Label>
-                    <p className="text-xs text-muted-foreground">Cuando cambian horario, lugar u otros datos del partido</p>
-                  </div>
-                  <Switch
+                <div className="pl-3">
+                  <NotificationSwitchRow
                     id="notif-match-changes"
-                    disabled={loadingUser || savingNotifications}
+                    label="Cambios en el partido"
+                    description="Cuando cambian horario, lugar u otros datos del partido"
                     checked={notifications.matchChanges}
-                    onCheckedChange={(v) => setNotifications((n) => ({ ...n, matchChanges: v }))}
+                    disabled={loadingUser}
+                    saving={savingNotificationKey === 'matchChanges'}
+                    onCheckedChange={(v) => handleNotificationFieldChange('matchChanges', v, 'matchChanges')}
                   />
                 </div>
 
-                <div className="flex items-center justify-between gap-4 pl-3">
-                  <div className="flex flex-col gap-0.5">
-                    <Label htmlFor="notif-cancellation">Baja de jugador</Label>
-                    <p className="text-xs text-muted-foreground">Cuando alguien se da de baja de un partido en el que estás anotado</p>
-                  </div>
-                  <Switch
+                <div className="pl-3">
+                  <NotificationSwitchRow
                     id="notif-cancellation"
-                    disabled={loadingUser || savingNotifications}
+                    label="Baja de jugador"
+                    description="Cuando alguien se da de baja de un partido en el que estás anotado"
                     checked={notifications.cancellation}
-                    onCheckedChange={(v) => setNotifications((n) => ({ ...n, cancellation: v }))}
+                    disabled={loadingUser}
+                    saving={savingNotificationKey === 'cancellation'}
+                    onCheckedChange={(v) => handleNotificationFieldChange('cancellation', v, 'cancellation')}
                   />
                 </div>
 
-                <div className="flex items-center justify-between gap-4 pl-3">
-                  <div className="flex flex-col gap-0.5">
-                    <Label htmlFor="notif-reminder">Recordatorio de partido</Label>
-                    <p className="text-xs text-muted-foreground">Un aviso antes de que empiece el partido</p>
-                  </div>
-                  <Switch
+                <div className="pl-3">
+                  <NotificationSwitchRow
                     id="notif-reminder"
-                    disabled={loadingUser || savingNotifications}
+                    label="Recordatorio de partido"
+                    description="Un aviso antes de que empiece el partido"
                     checked={notifications.reminder}
-                    onCheckedChange={(v) => setNotifications((n) => ({ ...n, reminder: v }))}
+                    disabled={loadingUser}
+                    saving={savingNotificationKey === 'reminder'}
+                    onCheckedChange={(v) => handleNotificationFieldChange('reminder', v, 'reminder')}
                   />
                 </div>
 
                 {notifications.reminder && (
                   <div className="flex flex-col gap-2 pl-3">
                     <Label htmlFor="notif-reminder-time">Minutos antes del partido</Label>
-                    <Input
-                      id="notif-reminder-time"
-                      type="number"
-                      min={5}
-                      max={1440}
-                      disabled={loadingUser || savingNotifications}
-                      value={notifications.reminderTime}
-                      onChange={(e) =>
-                        setNotifications((n) => ({ ...n, reminderTime: Number(e.target.value) || 60 }))
-                      }
-                    />
+                    <div className="flex items-center gap-2">
+                      <Input
+                        id="notif-reminder-time"
+                        type="number"
+                        min={5}
+                        max={1440}
+                        disabled={loadingUser || savingNotificationKey === 'reminderTime'}
+                        value={notifications.reminderTime}
+                        onChange={(e) => handleReminderTimeChange(Number(e.target.value) || 60)}
+                      />
+                      {savingNotificationKey === 'reminderTime' && (
+                        <Loader2 className="w-3.5 h-3.5 animate-spin text-muted-foreground shrink-0" aria-hidden="true" />
+                      )}
+                    </div>
                     <p className="text-xs text-muted-foreground">
                       Entre 5 y 1440 minutos (24 hs)
                     </p>
                   </div>
                 )}
               </div>
-            )}
-
-            <Button type="submit" className="gap-2" disabled={loadingUser || savingNotifications}>
-              <Save className="w-4 h-4" />
-              Guardar notificaciones
-            </Button>
-          </form>
+            </AnimatedCollapse>
+          </div>
       </SettingsSection>
     </div>
   )
