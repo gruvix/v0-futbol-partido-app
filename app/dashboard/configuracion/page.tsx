@@ -364,17 +364,19 @@ export default function ConfiguracionPage(): React.JSX.Element {
 
     setSavingNotificationKey(savingKey)
     try {
-      if (anyEnabled && pushPermission !== 'unsupported') {
-        const ok = await subscribeToPush()
-        if (!ok) {
-          const fresh = await getPushNotificationsSettings()
-          if (fresh) setNotifications(fresh)
-          return false
+      if (mobilePushAvailable) {
+        if (anyEnabled && pushPermission !== 'unsupported') {
+          const ok = await subscribeToPush()
+          if (!ok) {
+            const fresh = await getPushNotificationsSettings()
+            if (fresh) setNotifications(fresh)
+            return false
+          }
         }
-      }
 
-      if (!anyEnabled && pushPermission !== 'unsupported') {
-        await unsubscribeFromPush()
+        if (!anyEnabled && pushPermission !== 'unsupported') {
+          await unsubscribeFromPush()
+        }
       }
 
       const fd = new FormData()
@@ -866,7 +868,6 @@ export default function ConfiguracionPage(): React.JSX.Element {
           </form>
       </SettingsSection>
 
-      {mobilePushAvailable && (
       <SettingsSection
         id="notifications"
         activeSection={activeSection}
@@ -875,39 +876,45 @@ export default function ConfiguracionPage(): React.JSX.Element {
         title="Notificaciones push"
         description="Elegí qué notificaciones querés recibir."
         extra={
-          <>
-            {pushPermission === 'unsupported' && (
-              <p className="text-xs text-yellow-500 mt-1">
-                Tu navegador no soporta notificaciones push.
-              </p>
-            )}
-            {anyNotificationEnabled && (pushPermission === 'denied' || pushPermission === 'default') && (
-              <div className="flex flex-col gap-2 mt-1">
-                <p className={`text-xs ${pushPermission === 'denied' ? 'text-red-500' : 'text-yellow-600'}`}>
-                  {pushPermission === 'denied'
-                    ? 'Tenés notificaciones configuradas, pero están bloqueadas en este navegador. Es posible que necesites habilitarlas manualmente desde la configuración del navegador o del sistema.'
-                    : 'Tenés notificaciones configuradas, pero este navegador todavía no te pidió permiso para mostrarlas.'}
+          mobilePushAvailable ? (
+            <>
+              {pushPermission === 'unsupported' && (
+                <p className="text-xs text-yellow-500 mt-1">
+                  Tu navegador no soporta notificaciones push.
                 </p>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  className="w-fit gap-2"
-                  disabled={requestingPermission}
-                  onClick={(e) => {
-                    e.stopPropagation()
-                    void handleRequestPushPermission()
-                  }}
-                >
-                  <Bell className="w-3.5 h-3.5" />
-                  {requestingPermission ? 'Solicitando...' : 'Permitir notificaciones'}
-                </Button>
-                {pushJustActivated && (
-                  <p className="text-xs text-primary">Listo, ya podés recibir avisos en este navegador.</p>
-                )}
-              </div>
-            )}
-          </>
+              )}
+              {anyNotificationEnabled && (pushPermission === 'denied' || pushPermission === 'default') && (
+                <div className="flex flex-col gap-2 mt-1">
+                  <p className={`text-xs ${pushPermission === 'denied' ? 'text-red-500' : 'text-yellow-600'}`}>
+                    {pushPermission === 'denied'
+                      ? 'Tenés notificaciones configuradas, pero están bloqueadas en este navegador. Es posible que necesites habilitarlas manualmente desde la configuración del navegador o del sistema.'
+                      : 'Tenés notificaciones configuradas, pero este navegador todavía no te pidió permiso para mostrarlas.'}
+                  </p>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="w-fit gap-2"
+                    disabled={requestingPermission}
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      void handleRequestPushPermission()
+                    }}
+                  >
+                    <Bell className="w-3.5 h-3.5" />
+                    {requestingPermission ? 'Solicitando...' : 'Permitir notificaciones'}
+                  </Button>
+                  {pushJustActivated && (
+                    <p className="text-xs text-primary">Listo, ya podés recibir avisos en este navegador.</p>
+                  )}
+                </div>
+              )}
+            </>
+          ) : (
+            <p className="text-xs text-muted-foreground mt-1">
+              Los avisos push se reciben en tu celular.
+            </p>
+          )
         }
       >
           <div className="flex flex-col gap-4">
@@ -1037,7 +1044,6 @@ export default function ConfiguracionPage(): React.JSX.Element {
             </AnimatedCollapse>
           </div>
       </SettingsSection>
-      )}
     </div>
   )
 }
