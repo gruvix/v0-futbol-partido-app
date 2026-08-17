@@ -9,11 +9,10 @@ import { getCurrentUser, updateMyProfile, changeMyPassword, addEmailToProfile, r
 import {
   getPushNotificationsSettings,
   updatePushNotificationsSettings,
-  savePushSubscription,
   deletePushSubscription,
   type PushNotificationsSettings,
 } from '@/app/actions/notifications'
-import { urlBase64ToUint8Array } from '@/lib/push-utils'
+import { syncPushSubscription } from '@/lib/push-client'
 import { savePixelAvatar, getMyPixelAvatar } from '@/app/actions/avatar'
 import { useErrorToast } from '@/components/error-toast-provider'
 import { PixelAvatarEditor } from '@/components/pixel-avatar-editor'
@@ -117,44 +116,22 @@ export default function ConfiguracionPage(): React.JSX.Element {
    * Returns true if the subscription was saved successfully.
    */
   const subscribeToPush = useCallback(async (): Promise<boolean> => {
-    const vapidKey = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY
-    if (!vapidKey) {
-      console.error('Missing NEXT_PUBLIC_VAPID_PUBLIC_KEY')
-      showError('Error', 'El servidor no tiene configuradas las claves VAPID para push')
-      return false
-    }
+    const result = await syncPushSubscription(true)
+    setPushPermission(Notification.permission)
 
-    const permission = await Notification.requestPermission()
-    setPushPermission(permission)
+    if (result.status === 'ok') return true
 
-    if (permission !== 'granted') {
+    if (result.status === 'denied' || result.status === 'needs_permission') {
       showError('Permiso denegado', 'Habilitá las notificaciones en la configuración del navegador para recibir avisos')
       return false
     }
 
-    const reg = swRegistrationRef.current ?? (await navigator.serviceWorker.ready)
-    swRegistrationRef.current = reg
-
-    let subscription = await reg.pushManager.getSubscription()
-    if (!subscription) {
-      subscription = await reg.pushManager.subscribe({
-        userVisibleOnly: true,
-        applicationServerKey: urlBase64ToUint8Array(vapidKey),
-      })
-    }
-
-    const subJson = subscription.toJSON()
-    const result = await savePushSubscription({
-      endpoint: subscription.endpoint,
-      p256dh: subJson.keys?.p256dh ?? '',
-      auth: subJson.keys?.auth ?? '',
-    })
-
-    if (result.error) {
-      showError('Error', result.error)
+    if (result.status === 'error') {
+      showError('Error', result.message)
       return false
     }
-    return true
+
+    return false
   }, [showError])
 
   /**
