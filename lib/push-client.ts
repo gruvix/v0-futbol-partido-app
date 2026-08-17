@@ -19,7 +19,6 @@ export function isAnyPushSettingEnabled(settings: PushNotificationsSettings): bo
     settings.matchFilled ||
     settings.matchChanges ||
     settings.cancellation ||
-    settings.paymentReminder ||
     settings.reminder
   )
 }

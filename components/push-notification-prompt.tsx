@@ -1,6 +1,6 @@
 'use client'
 
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { Bell } from 'lucide-react'
@@ -40,6 +40,8 @@ export function PushNotificationPrompt({ userId }: PushNotificationPromptProps):
   const [open, setOpen] = useState(false)
   const [mode, setMode] = useState<PromptMode>('needs_permission')
   const [activating, setActivating] = useState(false)
+  const [showDismissHint, setShowDismissHint] = useState(false)
+  const dismissHintTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   useEffect(() => {
     if (pathname?.includes('/configuracion')) return
@@ -73,9 +75,19 @@ export function PushNotificationPrompt({ userId }: PushNotificationPromptProps):
     }
   }, [userId, pathname])
 
+  useEffect(() => {
+    return () => {
+      if (dismissHintTimeoutRef.current) clearTimeout(dismissHintTimeoutRef.current)
+    }
+  }, [])
+
   function handleDismiss(): void {
     localStorage.setItem(dismissKey(userId), '1')
     setOpen(false)
+
+    setShowDismissHint(true)
+    if (dismissHintTimeoutRef.current) clearTimeout(dismissHintTimeoutRef.current)
+    dismissHintTimeoutRef.current = setTimeout(() => setShowDismissHint(false), 5000)
   }
 
   async function handleActivate(): Promise<void> {
@@ -101,38 +113,52 @@ export function PushNotificationPrompt({ userId }: PushNotificationPromptProps):
   }
 
   return (
-    <Dialog
-      open={open}
-      onOpenChange={(nextOpen) => {
-        if (!nextOpen) handleDismiss()
-      }}
-    >
-      <DialogContent className="sm:max-w-md">
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-2">
-            <Bell className="h-5 w-5" />
-            ¿Habilitar notificaciones en este navegador?
-          </DialogTitle>
-          <DialogDescription className="text-left pt-1">
-            Tenés notificaciones configuradas pero tu navegador no permite mostrarlas.
-          </DialogDescription>
-        </DialogHeader>
+    <>
+      <Dialog
+        open={open}
+        onOpenChange={(nextOpen) => {
+          if (!nextOpen) handleDismiss()
+        }}
+      >
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Bell className="h-5 w-5" />
+              ¿Habilitar notificaciones en este navegador?
+            </DialogTitle>
+            <DialogDescription className="text-left pt-1">
+              Tenés notificaciones configuradas pero tu navegador no permite mostrarlas.
+            </DialogDescription>
+          </DialogHeader>
 
-        <DialogFooter className="gap-2 sm:gap-0">
-          <Button type="button" variant="outline" onClick={handleDismiss} disabled={activating}>
-            Ahora no
-          </Button>
-          {mode === 'needs_permission' ? (
-            <Button type="button" onClick={handleActivate} disabled={activating}>
-              Activar notificaciones
+          <DialogFooter className="gap-2 sm:gap-0">
+            <Button type="button" variant="outline" onClick={handleDismiss} disabled={activating}>
+              Ahora no
             </Button>
-          ) : (
-            <Button type="button" asChild>
-              <Link href="/dashboard/configuracion">Cómo habilitarlas</Link>
-            </Button>
-          )}
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+            {mode === 'needs_permission' ? (
+              <Button type="button" onClick={handleActivate} disabled={activating}>
+                Activar notificaciones
+              </Button>
+            ) : (
+              <Button type="button" asChild>
+                <Link href="/dashboard/configuracion">Cómo habilitarlas</Link>
+              </Button>
+            )}
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {showDismissHint && (
+        <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-[10002] px-4 w-full max-w-sm">
+          <div className="rounded-lg border border-border bg-background shadow-lg p-3 text-sm text-foreground text-center animate-in fade-in slide-in-from-bottom-2">
+            Podés activarlas cuando quieras desde{' '}
+            <Link href="/dashboard/configuracion" className="underline font-medium">
+              Configuración
+            </Link>
+            .
+          </div>
+        </div>
+      )}
+    </>
   )
 }

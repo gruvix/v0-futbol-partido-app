@@ -3,7 +3,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { ArrowLeft, Save, Settings, LockKeyhole, Bell, Mail } from 'lucide-react'
+import { ArrowLeft, Save, Settings, LockKeyhole, Bell, Mail, ChevronDown, User } from 'lucide-react'
 
 import { getCurrentUser, updateMyProfile, changeMyPassword, addEmailToProfile, requestEmailChangeAction } from '@/app/actions/auth'
 import {
@@ -46,10 +46,68 @@ function setAlnumCustomValidity(input: HTMLInputElement, label: string): void {
   input.setCustomValidity(/^[a-z0-9]+$/i.test(input.value) ? '' : `${label} solo puede contener letras y numeros (sin espacios ni simbolos)`)
 }
 
+type SectionId = 'perfil' | 'avatar' | 'email' | 'password' | 'notifications'
+
+type SettingsSectionProps = {
+  id: SectionId
+  activeSection: SectionId | null
+  onToggle: (id: SectionId) => void
+  icon: React.ReactNode
+  title: string
+  description?: React.ReactNode
+  extra?: React.ReactNode
+  children: React.ReactNode
+}
+
+function SettingsSection({
+  id,
+  activeSection,
+  onToggle,
+  icon,
+  title,
+  description,
+  extra,
+  children,
+}: SettingsSectionProps): React.JSX.Element {
+  const isOpen = activeSection === id
+
+  return (
+    <Card className="max-w-lg">
+      <CardHeader
+        role="button"
+        tabIndex={0}
+        aria-expanded={isOpen}
+        onClick={() => onToggle(id)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault()
+            onToggle(id)
+          }
+        }}
+        className="cursor-pointer select-none"
+      >
+        <div className="flex items-center justify-between gap-2">
+          <CardTitle className="text-foreground flex items-center gap-2">
+            {icon}
+            {title}
+          </CardTitle>
+          <ChevronDown
+            className={`w-4 h-4 text-muted-foreground transition-transform shrink-0 ${isOpen ? 'rotate-180' : ''}`}
+          />
+        </div>
+        {description && <CardDescription className="text-muted-foreground">{description}</CardDescription>}
+        {extra}
+      </CardHeader>
+      {isOpen && <CardContent>{children}</CardContent>}
+    </Card>
+  )
+}
+
 export default function ConfiguracionPage(): React.JSX.Element {
   const router = useRouter()
   const { showError } = useErrorToast()
 
+  const [activeSection, setActiveSection] = useState<SectionId | null>(null)
   const [loadingUser, setLoadingUser] = useState<boolean>(true)
   const [savingProfile, setSavingProfile] = useState<boolean>(false)
   const [savingPassword, setSavingPassword] = useState<boolean>(false)
@@ -83,12 +141,14 @@ export default function ConfiguracionPage(): React.JSX.Element {
     matchFilled: false,
     matchChanges: false,
     cancellation: false,
-    paymentReminder: false,
     reminder: false,
     reminderTime: 60,
   })
+  const [showAdvancedNotifications, setShowAdvancedNotifications] = useState<boolean>(false)
 
   const [pushPermission, setPushPermission] = useState<NotificationPermission | 'unsupported'>('default')
+  const [requestingPermission, setRequestingPermission] = useState<boolean>(false)
+  const [pushJustActivated, setPushJustActivated] = useState<boolean>(false)
   const swRegistrationRef = useRef<ServiceWorkerRegistration | null>(null)
 
   // Register service worker on mount and track permission status
@@ -187,6 +247,29 @@ export default function ConfiguracionPage(): React.JSX.Element {
         setLoadingUser(false)
       })
   }, [router, showError])
+
+  const anyNotificationEnabled = useMemo(
+    () =>
+      notifications.newMatch ||
+      notifications.matchCancelled ||
+      notifications.matchFilled ||
+      notifications.matchChanges ||
+      notifications.cancellation ||
+      notifications.reminder,
+    [notifications],
+  )
+
+  function handleToggleAllNotifications(enabled: boolean): void {
+    setNotifications((n) => ({
+      ...n,
+      newMatch: enabled,
+      matchCancelled: enabled,
+      matchFilled: enabled,
+      matchChanges: enabled,
+      cancellation: enabled,
+      reminder: enabled,
+    }))
+  }
 
   const profileDirty = useMemo(() => {
     // Without storing an initial snapshot we can approximate: if any field is empty we still allow save.
@@ -315,17 +398,8 @@ export default function ConfiguracionPage(): React.JSX.Element {
     e.preventDefault()
     setSavingNotifications(true)
     try {
-      const anyEnabled =
-        notifications.newMatch ||
-        notifications.matchCancelled ||
-        notifications.matchFilled ||
-        notifications.matchChanges ||
-        notifications.cancellation ||
-        notifications.paymentReminder ||
-        notifications.reminder
-
       // If any notification is enabled, request permission + subscribe
-      if (anyEnabled && pushPermission !== 'unsupported') {
+      if (anyNotificationEnabled && pushPermission !== 'unsupported') {
         const ok = await subscribeToPush()
         if (!ok) {
           // Permission denied or subscription failed — don't save settings
@@ -335,7 +409,7 @@ export default function ConfiguracionPage(): React.JSX.Element {
       }
 
       // If all notifications disabled, unsubscribe
-      if (!anyEnabled && pushPermission !== 'unsupported') {
+      if (!anyNotificationEnabled && pushPermission !== 'unsupported') {
         await unsubscribeFromPush()
       }
 
@@ -345,7 +419,6 @@ export default function ConfiguracionPage(): React.JSX.Element {
       fd.set('matchFilled', String(notifications.matchFilled))
       fd.set('matchChanges', String(notifications.matchChanges))
       fd.set('cancellation', String(notifications.cancellation))
-      fd.set('paymentReminder', String(notifications.paymentReminder))
       fd.set('reminder', String(notifications.reminder))
       fd.set('reminderTime', String(notifications.reminderTime))
 
@@ -359,6 +432,23 @@ export default function ConfiguracionPage(): React.JSX.Element {
       showError('Error al guardar notificaciones')
     } finally {
       setSavingNotifications(false)
+    }
+  }
+
+  function handleToggleSection(id: SectionId): void {
+    setActiveSection((prev) => (prev === id ? null : id))
+  }
+
+  async function handleRequestPushPermission(): Promise<void> {
+    setRequestingPermission(true)
+    setPushJustActivated(false)
+    try {
+      const ok = await subscribeToPush()
+      if (ok) {
+        setPushJustActivated(true)
+      }
+    } finally {
+      setRequestingPermission(false)
     }
   }
 
@@ -377,14 +467,18 @@ export default function ConfiguracionPage(): React.JSX.Element {
         <p className="text-sm text-muted-foreground">Actualizá tus datos y tu contraseña</p>
       </div>
 
-      <Card className="max-w-lg">
-        <CardHeader>
-          <CardTitle className="text-foreground">Perfil</CardTitle>
-          <CardDescription className="text-muted-foreground">
+      <SettingsSection
+        id="perfil"
+        activeSection={activeSection}
+        onToggle={handleToggleSection}
+        icon={<User className="w-4 h-4" />}
+        title="Perfil"
+        description={
+          <>
             Tu identificación es <span className="font-medium">Nombre + últimos 4 dígitos</span>. Si lo cambiás, debe seguir siendo único.
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
+          </>
+        }
+      >
           <form onSubmit={handleSaveProfile} className="flex flex-col gap-4">
             <div className="flex flex-col gap-2">
               <Label htmlFor="name">Nombre</Label>
@@ -470,20 +564,16 @@ export default function ConfiguracionPage(): React.JSX.Element {
               Guardar cambios
             </Button>
           </form>
-        </CardContent>
-      </Card>
+      </SettingsSection>
 
-      <Card className="max-w-lg">
-        <CardHeader>
-          <CardTitle className="text-foreground flex items-center gap-2">
-            <PixelAvatar data={avatarData} size={20} />
-            Avatar
-          </CardTitle>
-          <CardDescription className="text-muted-foreground">
-            Pintá tu avatar pixel art de 16×16. Se mostrará en la cancha cuando te sumés a un partido.
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
+      <SettingsSection
+        id="avatar"
+        activeSection={activeSection}
+        onToggle={handleToggleSection}
+        icon={<PixelAvatar data={avatarData} size={20} />}
+        title="Avatar"
+        description="Pintá tu avatar pixel art de 16×16. Se mostrará en la cancha cuando te sumés a un partido."
+      >
           {loadingUser ? (
             <p className="text-sm text-muted-foreground">Cargando...</p>
           ) : (
@@ -493,22 +583,20 @@ export default function ConfiguracionPage(): React.JSX.Element {
               saving={savingAvatar}
             />
           )}
-        </CardContent>
-      </Card>
+      </SettingsSection>
 
-      <Card className="max-w-lg">
-        <CardHeader>
-          <CardTitle className="text-foreground flex items-center gap-2">
-            <Mail className="w-4 h-4" />
-            Email
-          </CardTitle>
-          <CardDescription className="text-muted-foreground">
-            {savedEmail
-              ? 'Para cambiar tu email, confirmalo desde el correo nuevo. Cada email solo puede usarse en una cuenta.'
-              : 'Agregalo para poder iniciar sesion con tu email y recuperar tu cuenta si olvidas la contraseña. No pedimos verificacion al cargarlo por primera vez.'}
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
+      <SettingsSection
+        id="email"
+        activeSection={activeSection}
+        onToggle={handleToggleSection}
+        icon={<Mail className="w-4 h-4" />}
+        title="Email"
+        description={
+          savedEmail
+            ? 'Para cambiar tu email, confirmalo desde el correo nuevo. Cada email solo puede usarse en una cuenta.'
+            : 'Agregalo para poder iniciar sesion con tu email y recuperar tu cuenta si olvidas la contraseña. No pedimos verificacion al cargarlo por primera vez.'
+        }
+      >
           {savedEmail ? (
             <form onSubmit={handleRequestEmailChange} className="flex flex-col gap-4">
               <div className="flex flex-col gap-2">
@@ -600,20 +688,16 @@ export default function ConfiguracionPage(): React.JSX.Element {
             </Button>
           </form>
           )}
-        </CardContent>
-      </Card>
+      </SettingsSection>
 
-      <Card className="max-w-lg">
-        <CardHeader>
-          <CardTitle className="text-foreground flex items-center gap-2">
-            <LockKeyhole className="w-4 h-4" />
-            Contraseña
-          </CardTitle>
-          <CardDescription className="text-muted-foreground">
-            Para cambiarla, ingresá tu contraseña actual y repetí la nueva.
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
+      <SettingsSection
+        id="password"
+        activeSection={activeSection}
+        onToggle={handleToggleSection}
+        icon={<LockKeyhole className="w-4 h-4" />}
+        title="Contraseña"
+        description="Para cambiarla, ingresá tu contraseña actual y repetí la nueva."
+      >
           <form onSubmit={handleChangePassword} className="flex flex-col gap-4">
             <div className="flex flex-col gap-2">
               <Label htmlFor="currentPassword">Contraseña actual</Label>
@@ -667,138 +751,177 @@ export default function ConfiguracionPage(): React.JSX.Element {
               Cambiar contraseña
             </Button>
           </form>
-        </CardContent>
-      </Card>
-      <Card className="max-w-lg">
-        <CardHeader>
-          <CardTitle className="text-foreground flex items-center gap-2">
-            <Bell className="w-4 h-4" />
-            Notificaciones push
-          </CardTitle>
-          <CardDescription className="text-muted-foreground">
-            Elegí qué notificaciones querés recibir.
-          </CardDescription>
-          {pushPermission === 'unsupported' && (
-            <p className="text-xs text-yellow-500 mt-1">
-              Tu navegador no soporta notificaciones push.
-            </p>
-          )}
-          {pushPermission === 'denied' && (
-            <p className="text-xs text-red-500 mt-1">
-              Las notificaciones están bloqueadas. Habilitálas en la configuración del navegador.
-            </p>
-          )}
-        </CardHeader>
-        <CardContent>
+      </SettingsSection>
+
+      <SettingsSection
+        id="notifications"
+        activeSection={activeSection}
+        onToggle={handleToggleSection}
+        icon={<Bell className="w-4 h-4" />}
+        title="Notificaciones push"
+        description="Elegí qué notificaciones querés recibir."
+        extra={
+          <>
+            {pushPermission === 'unsupported' && (
+              <p className="text-xs text-yellow-500 mt-1">
+                Tu navegador no soporta notificaciones push.
+              </p>
+            )}
+            {anyNotificationEnabled && (pushPermission === 'denied' || pushPermission === 'default') && (
+              <div className="flex flex-col gap-2 mt-1">
+                <p className={`text-xs ${pushPermission === 'denied' ? 'text-red-500' : 'text-yellow-600'}`}>
+                  {pushPermission === 'denied'
+                    ? 'Tenés notificaciones configuradas, pero están bloqueadas en este navegador. Es posible que necesites habilitarlas manualmente desde la configuración del navegador o del sistema.'
+                    : 'Tenés notificaciones configuradas, pero este navegador todavía no te pidió permiso para mostrarlas.'}
+                </p>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="w-fit gap-2"
+                  disabled={requestingPermission}
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    void handleRequestPushPermission()
+                  }}
+                >
+                  <Bell className="w-3.5 h-3.5" />
+                  {requestingPermission ? 'Solicitando...' : 'Permitir notificaciones'}
+                </Button>
+                {pushJustActivated && (
+                  <p className="text-xs text-primary">Listo, ya podés recibir avisos en este navegador.</p>
+                )}
+              </div>
+            )}
+          </>
+        }
+      >
           <form onSubmit={handleSaveNotifications} className="flex flex-col gap-4">
             <div className="flex items-center justify-between gap-4">
               <div className="flex flex-col gap-0.5">
-                <Label htmlFor="notif-new-match">Nuevo partido creado</Label>
-                <p className="text-xs text-muted-foreground">Cuando se crea un nuevo partido</p>
-              </div>
-              <Switch
-                id="notif-new-match"
-                disabled={loadingUser || savingNotifications}
-                checked={notifications.newMatch}
-                onCheckedChange={(v) => setNotifications((n) => ({ ...n, newMatch: v }))}
-              />
-            </div>
-
-            <div className="flex items-center justify-between gap-4">
-              <div className="flex flex-col gap-0.5">
-                <Label htmlFor="notif-match-cancelled">Partido cancelado</Label>
-                <p className="text-xs text-muted-foreground">Cuando se cancela un partido</p>
-              </div>
-              <Switch
-                id="notif-match-cancelled"
-                disabled={loadingUser || savingNotifications}
-                checked={notifications.matchCancelled}
-                onCheckedChange={(v) => setNotifications((n) => ({ ...n, matchCancelled: v }))}
-              />
-            </div>
-
-            <div className="flex items-center justify-between gap-4">
-              <div className="flex flex-col gap-0.5">
-                <Label htmlFor="notif-match-filled">Partido lleno</Label>
-                <p className="text-xs text-muted-foreground">Cuando se completan los cupos de un partido</p>
-              </div>
-              <Switch
-                id="notif-match-filled"
-                disabled={loadingUser || savingNotifications}
-                checked={notifications.matchFilled}
-                onCheckedChange={(v) => setNotifications((n) => ({ ...n, matchFilled: v }))}
-              />
-            </div>
-
-            <div className="flex items-center justify-between gap-4">
-              <div className="flex flex-col gap-0.5">
-                <Label htmlFor="notif-match-changes">Cambios en el partido</Label>
-                <p className="text-xs text-muted-foreground">Cuando cambian horario, lugar u otros datos del partido</p>
-              </div>
-              <Switch
-                id="notif-match-changes"
-                disabled={loadingUser || savingNotifications}
-                checked={notifications.matchChanges}
-                onCheckedChange={(v) => setNotifications((n) => ({ ...n, matchChanges: v }))}
-              />
-            </div>
-
-            <div className="flex items-center justify-between gap-4">
-              <div className="flex flex-col gap-0.5">
-                <Label htmlFor="notif-cancellation">Baja de jugador</Label>
-                <p className="text-xs text-muted-foreground">Cuando alguien se da de baja de un partido en el que estás anotado</p>
-              </div>
-              <Switch
-                id="notif-cancellation"
-                disabled={loadingUser || savingNotifications}
-                checked={notifications.cancellation}
-                onCheckedChange={(v) => setNotifications((n) => ({ ...n, cancellation: v }))}
-              />
-            </div>
-
-            <div className="flex items-center justify-between gap-4">
-              <div className="flex flex-col gap-0.5">
-                <Label htmlFor="notif-reminder">Recordatorio de partido</Label>
-                <p className="text-xs text-muted-foreground">Un aviso antes de que empiece el partido</p>
-              </div>
-              <Switch
-                id="notif-reminder"
-                disabled={loadingUser || savingNotifications}
-                checked={notifications.reminder}
-                onCheckedChange={(v) => setNotifications((n) => ({ ...n, reminder: v }))}
-              />
-            </div>
-
-            <div className="flex items-center justify-between gap-4">
-              <div className="flex flex-col gap-0.5">
-                <Label htmlFor="notif-payment-reminder">Recordatorio de pago</Label>
-                <p className="text-xs text-muted-foreground">Cuánto le debés al creador del partido</p>
-              </div>
-              <Switch
-                id="notif-payment-reminder"
-                disabled={loadingUser || savingNotifications}
-                checked={notifications.paymentReminder}
-                onCheckedChange={(v) => setNotifications((n) => ({ ...n, paymentReminder: v }))}
-              />
-            </div>
-
-            {notifications.reminder && (
-              <div className="flex flex-col gap-2 pl-1">
-                <Label htmlFor="notif-reminder-time">Minutos antes del partido</Label>
-                <Input
-                  id="notif-reminder-time"
-                  type="number"
-                  min={5}
-                  max={1440}
-                  disabled={loadingUser || savingNotifications}
-                  value={notifications.reminderTime}
-                  onChange={(e) =>
-                    setNotifications((n) => ({ ...n, reminderTime: Number(e.target.value) || 60 }))
-                  }
-                />
+                <Label htmlFor="notif-master">Notificaciones</Label>
                 <p className="text-xs text-muted-foreground">
-                  Entre 5 y 1440 minutos (24 hs)
+                  {anyNotificationEnabled ? 'Vas a recibir avisos de tus partidos' : 'No vas a recibir avisos'}
                 </p>
+              </div>
+              <Switch
+                id="notif-master"
+                disabled={loadingUser || savingNotifications}
+                checked={anyNotificationEnabled}
+                onCheckedChange={(v) => handleToggleAllNotifications(v)}
+              />
+            </div>
+
+            {anyNotificationEnabled && (
+              <button
+                type="button"
+                className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors w-fit"
+                onClick={() => setShowAdvancedNotifications((v) => !v)}
+              >
+                <ChevronDown className={`w-3.5 h-3.5 transition-transform ${showAdvancedNotifications ? 'rotate-180' : ''}`} />
+                {showAdvancedNotifications ? 'Ocultar tipos de notificación' : 'Elegir qué notificaciones recibir'}
+              </button>
+            )}
+
+            {anyNotificationEnabled && showAdvancedNotifications && (
+              <div className="flex flex-col gap-4 pl-1 border-l-2 border-border ml-1">
+                <div className="flex items-center justify-between gap-4 pl-3">
+                  <div className="flex flex-col gap-0.5">
+                    <Label htmlFor="notif-new-match">Nuevo partido creado</Label>
+                    <p className="text-xs text-muted-foreground">Cuando se crea un nuevo partido</p>
+                  </div>
+                  <Switch
+                    id="notif-new-match"
+                    disabled={loadingUser || savingNotifications}
+                    checked={notifications.newMatch}
+                    onCheckedChange={(v) => setNotifications((n) => ({ ...n, newMatch: v }))}
+                  />
+                </div>
+
+                <div className="flex items-center justify-between gap-4 pl-3">
+                  <div className="flex flex-col gap-0.5">
+                    <Label htmlFor="notif-match-cancelled">Partido cancelado</Label>
+                    <p className="text-xs text-muted-foreground">Cuando se cancela un partido</p>
+                  </div>
+                  <Switch
+                    id="notif-match-cancelled"
+                    disabled={loadingUser || savingNotifications}
+                    checked={notifications.matchCancelled}
+                    onCheckedChange={(v) => setNotifications((n) => ({ ...n, matchCancelled: v }))}
+                  />
+                </div>
+
+                <div className="flex items-center justify-between gap-4 pl-3">
+                  <div className="flex flex-col gap-0.5">
+                    <Label htmlFor="notif-match-filled">Partido lleno</Label>
+                    <p className="text-xs text-muted-foreground">Cuando se completan los cupos de un partido</p>
+                  </div>
+                  <Switch
+                    id="notif-match-filled"
+                    disabled={loadingUser || savingNotifications}
+                    checked={notifications.matchFilled}
+                    onCheckedChange={(v) => setNotifications((n) => ({ ...n, matchFilled: v }))}
+                  />
+                </div>
+
+                <div className="flex items-center justify-between gap-4 pl-3">
+                  <div className="flex flex-col gap-0.5">
+                    <Label htmlFor="notif-match-changes">Cambios en el partido</Label>
+                    <p className="text-xs text-muted-foreground">Cuando cambian horario, lugar u otros datos del partido</p>
+                  </div>
+                  <Switch
+                    id="notif-match-changes"
+                    disabled={loadingUser || savingNotifications}
+                    checked={notifications.matchChanges}
+                    onCheckedChange={(v) => setNotifications((n) => ({ ...n, matchChanges: v }))}
+                  />
+                </div>
+
+                <div className="flex items-center justify-between gap-4 pl-3">
+                  <div className="flex flex-col gap-0.5">
+                    <Label htmlFor="notif-cancellation">Baja de jugador</Label>
+                    <p className="text-xs text-muted-foreground">Cuando alguien se da de baja de un partido en el que estás anotado</p>
+                  </div>
+                  <Switch
+                    id="notif-cancellation"
+                    disabled={loadingUser || savingNotifications}
+                    checked={notifications.cancellation}
+                    onCheckedChange={(v) => setNotifications((n) => ({ ...n, cancellation: v }))}
+                  />
+                </div>
+
+                <div className="flex items-center justify-between gap-4 pl-3">
+                  <div className="flex flex-col gap-0.5">
+                    <Label htmlFor="notif-reminder">Recordatorio de partido</Label>
+                    <p className="text-xs text-muted-foreground">Un aviso antes de que empiece el partido</p>
+                  </div>
+                  <Switch
+                    id="notif-reminder"
+                    disabled={loadingUser || savingNotifications}
+                    checked={notifications.reminder}
+                    onCheckedChange={(v) => setNotifications((n) => ({ ...n, reminder: v }))}
+                  />
+                </div>
+
+                {notifications.reminder && (
+                  <div className="flex flex-col gap-2 pl-3">
+                    <Label htmlFor="notif-reminder-time">Minutos antes del partido</Label>
+                    <Input
+                      id="notif-reminder-time"
+                      type="number"
+                      min={5}
+                      max={1440}
+                      disabled={loadingUser || savingNotifications}
+                      value={notifications.reminderTime}
+                      onChange={(e) =>
+                        setNotifications((n) => ({ ...n, reminderTime: Number(e.target.value) || 60 }))
+                      }
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      Entre 5 y 1440 minutos (24 hs)
+                    </p>
+                  </div>
+                )}
               </div>
             )}
 
@@ -807,8 +930,7 @@ export default function ConfiguracionPage(): React.JSX.Element {
               Guardar notificaciones
             </Button>
           </form>
-        </CardContent>
-      </Card>
+      </SettingsSection>
     </div>
   )
 }
