@@ -19,7 +19,7 @@ import {
 import {
   isAnyPushSettingEnabled,
   isBrowserPushReady,
-  isPushSupported,
+  canUsePushNotifications,
   resyncExistingPushSubscription,
   syncPushSubscription,
 } from '@/lib/push-client'
@@ -37,6 +37,7 @@ function dismissKey(userId: number): string {
 export function PushNotificationPrompt({ userId }: PushNotificationPromptProps): React.JSX.Element | null {
   const pathname = usePathname()
   const { showError } = useErrorToast()
+  const [mobilePushAvailable, setMobilePushAvailable] = useState(false)
   const [open, setOpen] = useState(false)
   const [mode, setMode] = useState<PromptMode>('needs_permission')
   const [activating, setActivating] = useState(false)
@@ -44,6 +45,11 @@ export function PushNotificationPrompt({ userId }: PushNotificationPromptProps):
   const dismissHintTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   useEffect(() => {
+    setMobilePushAvailable(canUsePushNotifications())
+  }, [])
+
+  useEffect(() => {
+    if (!mobilePushAvailable) return
     if (pathname?.includes('/configuracion')) return
 
     let cancelled = false
@@ -51,7 +57,7 @@ export function PushNotificationPrompt({ userId }: PushNotificationPromptProps):
     async function checkPushState(): Promise<void> {
       const settings = await getPushNotificationsSettings()
       if (!settings || !isAnyPushSettingEnabled(settings)) return
-      if (!isPushSupported()) return
+      if (!canUsePushNotifications()) return
 
       if (await isBrowserPushReady()) {
         const result = await resyncExistingPushSubscription()
@@ -73,7 +79,7 @@ export function PushNotificationPrompt({ userId }: PushNotificationPromptProps):
     return () => {
       cancelled = true
     }
-  }, [userId, pathname])
+  }, [userId, pathname, mobilePushAvailable])
 
   useEffect(() => {
     return () => {
@@ -111,6 +117,8 @@ export function PushNotificationPrompt({ userId }: PushNotificationPromptProps):
       setActivating(false)
     }
   }
+
+  if (!mobilePushAvailable) return null
 
   return (
     <>

@@ -12,7 +12,7 @@ import {
   deletePushSubscription,
   type PushNotificationsSettings,
 } from '@/app/actions/notifications'
-import { syncPushSubscription, isAnyPushSettingEnabled } from '@/lib/push-client'
+import { syncPushSubscription, isAnyPushSettingEnabled, canUsePushNotifications } from '@/lib/push-client'
 import { cn } from '@/lib/utils'
 import { savePixelAvatar, getMyPixelAvatar } from '@/app/actions/avatar'
 import { useErrorToast } from '@/components/error-toast-provider'
@@ -216,6 +216,7 @@ export default function ConfiguracionPage(): React.JSX.Element {
     reminderTime: 60,
   })
   const [showAdvancedNotifications, setShowAdvancedNotifications] = useState<boolean>(false)
+  const [mobilePushAvailable, setMobilePushAvailable] = useState<boolean>(false)
 
   const [pushPermission, setPushPermission] = useState<NotificationPermission | 'unsupported'>('default')
   const [requestingPermission, setRequestingPermission] = useState<boolean>(false)
@@ -223,10 +224,14 @@ export default function ConfiguracionPage(): React.JSX.Element {
   const swRegistrationRef = useRef<ServiceWorkerRegistration | null>(null)
   const reminderTimeDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
-  // Register service worker on mount and track permission status
+  // Register service worker on mount and track permission status (phones only)
   useEffect(() => {
     if (typeof window === 'undefined') return
-    if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
+
+    const available = canUsePushNotifications()
+    setMobilePushAvailable(available)
+
+    if (!available) {
       setPushPermission('unsupported')
       return
     }
@@ -861,6 +866,7 @@ export default function ConfiguracionPage(): React.JSX.Element {
           </form>
       </SettingsSection>
 
+      {mobilePushAvailable && (
       <SettingsSection
         id="notifications"
         activeSection={activeSection}
@@ -1031,6 +1037,7 @@ export default function ConfiguracionPage(): React.JSX.Element {
             </AnimatedCollapse>
           </div>
       </SettingsSection>
+      )}
     </div>
   )
 }

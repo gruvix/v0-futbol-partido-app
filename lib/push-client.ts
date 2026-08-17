@@ -12,6 +12,17 @@ export function isPushSupported(): boolean {
   return typeof window !== 'undefined' && 'serviceWorker' in navigator && 'PushManager' in window
 }
 
+/** Phones only — excludes desktop browsers and most tablets. */
+export function isMobilePhoneDevice(): boolean {
+  if (typeof window === 'undefined') return false
+  const ua = navigator.userAgent
+  return /iPhone|iPod|Android.*Mobile|Windows Phone|IEMobile|Opera Mini/i.test(ua)
+}
+
+export function canUsePushNotifications(): boolean {
+  return isPushSupported() && isMobilePhoneDevice()
+}
+
 export function isAnyPushSettingEnabled(settings: PushNotificationsSettings): boolean {
   return (
     settings.newMatch ||
@@ -51,7 +62,7 @@ export async function hasLocalPushSubscription(): Promise<boolean> {
 
 /** Browser permission granted and this device has an active push subscription. */
 export async function isBrowserPushReady(): Promise<boolean> {
-  if (!isPushSupported()) return false
+  if (!canUsePushNotifications()) return false
   if (Notification.permission !== 'granted') return false
   return hasLocalPushSubscription()
 }
@@ -60,7 +71,7 @@ export async function isBrowserPushReady(): Promise<boolean> {
  * Save an existing local subscription to the server. Never requests permission or creates a subscription.
  */
 export async function resyncExistingPushSubscription(): Promise<PushSyncResult> {
-  if (!isPushSupported()) return { status: 'unsupported' }
+  if (!canUsePushNotifications()) return { status: 'unsupported' }
   if (Notification.permission !== 'granted') return { status: 'needs_permission' }
 
   try {
@@ -92,7 +103,7 @@ export async function resyncExistingPushSubscription(): Promise<PushSyncResult> 
  * Pass requestPermission=true to trigger Notification.requestPermission().
  */
 export async function syncPushSubscription(requestPermission = false): Promise<PushSyncResult> {
-  if (!isPushSupported()) return { status: 'unsupported' }
+  if (!canUsePushNotifications()) return { status: 'unsupported' }
 
   const currentPermission = Notification.permission
 
