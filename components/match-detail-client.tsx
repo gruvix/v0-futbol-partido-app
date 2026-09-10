@@ -1,1 +1,1 @@
-PLACEHOLDER_LOAD_FROM_FILE
+@workspace:components/match-detail-client.tsx
