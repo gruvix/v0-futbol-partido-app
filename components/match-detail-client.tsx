@@ -1,1 +1,1 @@
-@workspace:components/match-detail-client.tsx
+PLACEHOLDER
