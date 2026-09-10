@@ -13,6 +13,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import type { MatchCountsSummary } from '@/lib/match-summary'
+import { getMatchVenueLabel } from '@/lib/field-display'
 
 type MatchSummary = MatchCountsSummary
 
@@ -20,12 +21,6 @@ interface CalendarViewProps {
   initialMatches: MatchSummary[]
   initialYear: number
   initialMonth: number
-}
-
-const locationLabels: Record<string, string> = {
-  TERRAZAS: 'Terrazas',
-  FENIX: 'Fenix',
-  OTRO: 'Otro',
 }
 
 const monthNames = [
@@ -240,9 +235,7 @@ export function CalendarView({ initialMatches, initialYear, initialMonth }: Cale
                   .slice(0, 5)
                   .map(match => {
                     const date = new Date(match.date_time)
-                    const location = match.location_type === 'OTRO' && match.location_custom
-                      ? match.location_custom
-                      : locationLabels[match.location_type]
+                    const location = getMatchVenueLabel(match)
                     const hours = date.getUTCHours().toString().padStart(2, '0')
                     const minutes = date.getUTCMinutes().toString().padStart(2, '0')
                     
@@ -295,9 +288,7 @@ export function CalendarView({ initialMatches, initialYear, initialMonth }: Cale
             ) : (
               selectedDayMatches.map(match => {
                 const date = new Date(match.date_time)
-                const location = match.location_type === 'OTRO' && match.location_custom
-                  ? match.location_custom
-                  : locationLabels[match.location_type]
+                const location = getMatchVenueLabel(match)
                 const hours = date.getUTCHours().toString().padStart(2, '0')
                 const minutes = date.getUTCMinutes().toString().padStart(2, '0')
                 
