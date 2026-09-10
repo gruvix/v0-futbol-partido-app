@@ -25,6 +25,9 @@ async function getMatchesForCalendarMonth(year: number, month: number): Promise<
       m.date_time,
       m.location_type,
       m.location_custom,
+      m.field_id,
+      f.name as field_name,
+      f.slug as field_slug,
       COUNT(mp_all.id) FILTER (
         WHERE (CASE WHEN mp_all.role = 'EXTRA' THEN 'SUBSTITUTE' ELSE mp_all.role::text END) = 'PLAYER'
       )::int as player_count,
@@ -32,6 +35,7 @@ async function getMatchesForCalendarMonth(year: number, month: number): Promise<
         WHERE (CASE WHEN mp_all.role = 'EXTRA' THEN 'SUBSTITUTE' ELSE mp_all.role::text END) = 'SUBSTITUTE'
       )::int as substitute_count
     FROM matches m
+    LEFT JOIN fields f ON m.field_id = f.id
     LEFT JOIN match_participants mp_all ON m.id = mp_all.match_id
     WHERE
       m.date_time >= ${start.toISOString()} AND m.date_time < ${end.toISOString()}
