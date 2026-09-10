@@ -12,13 +12,14 @@ import {
   sendEligibleSubstitutesPush,
 } from '@/lib/push'
 import { computeMatchCapacity, computeRosterPolicy, type RosterParticipant } from '@/lib/match-roster'
+import { fieldSlugToLocationType, getFieldById } from '@/lib/fields'
 
 function computedMaxPlayers(teamCount: number, teamSize: number): number {
   if (teamCount <= 0) return 0
   return Math.max(1, teamCount) * Math.max(1, teamSize)
 }
 
-const FIELDS_TRIGGERING_CHANGE_NOTIFICATION = ['title', 'date_time', 'location_type', 'location_custom', 'field'] as const
+const FIELDS_TRIGGERING_CHANGE_NOTIFICATION = ['title', 'date_time', 'location_type', 'location_custom', 'field', 'field_id'] as const
 
 type ParticipantRole = 'PLAYER' | 'SUBSTITUTE'
 
@@ -253,9 +254,10 @@ export async function createMatch(formData: FormData) {
 
   const dateStr = formData.get('date') as string
   const time = formData.get('time') as string
-  const locationType = formData.get('locationType') as string
+  const fieldIdRaw = formData.get('fieldId') as string
   const locationCustom = formData.get('locationCustom') as string
-  const field = formData.get('field') as string
+  const courtLabel = formData.get('field') as string
+  const fieldId = parseInt(fieldIdRaw, 10)
   const isPublic = formData.get('isPublic') !== 'false' // default to true
   const titleInput = formData.get('title') as string
   const teamCount = parseInt(formData.get('teamCount') as string) || 0
@@ -274,8 +276,21 @@ export async function createMatch(formData: FormData) {
   const creatorName = (user[0]?.full_name as string | undefined) || 'Usuario'
   const title = titleInput?.trim() ? titleInput : `Partido de ${creatorName}`
 
-  if (!dateStr || !time || !locationType) {
+  if (!dateStr || !time || !fieldId) {
     return { error: 'Todos los campos son requeridos' }
+  }
+
+  const venue = await getFieldById(fieldId)
+  if (!venue || !venue.is_active) {
+    return { error: 'Cancha no valida' }
+  }
+
+  const locationType = fieldSlugToLocationType(venue.slug)
+  const locationCustomValue =
+    venue.slug === 'otro' ? (locationCustom?.trim() || null) : null
+
+  if (venue.slug === 'otro' && !locationCustomValue) {
+    return { error: 'Indicá el nombre de la ubicación' }
   }
 
   const dateTime = new Date(`${dateStr}T${time}`)
@@ -286,8 +301,8 @@ export async function createMatch(formData: FormData) {
 
   try {
     const result = await sql`
-      INSERT INTO matches (created_by_user_id, date_time, location_type, location_custom, field, is_public, title, team_count, team_size, max_players, invites_per_player, auto_admin_registered_players)
-      VALUES (${session.userId}, ${dateTime.toISOString()}, ${locationType}, ${locationCustom || null}, ${field || null}, ${isPublic}, ${title}, ${teamCount}, ${teamSize}, ${maxPlayers}, ${invitesPerPlayer}, ${autoAdminRegisteredPlayers})
+      INSERT INTO matches (created_by_user_id, date_time, location_type, location_custom, field, field_id, is_public, title, team_count, team_size, max_players, invites_per_player, auto_admin_registered_players)
+      VALUES (${session.userId}, ${dateTime.toISOString()}, ${locationType}, ${locationCustomValue}, ${courtLabel || null}, ${fieldId}, ${isPublic}, ${title}, ${teamCount}, ${teamSize}, ${maxPlayers}, ${invitesPerPlayer}, ${autoAdminRegisteredPlayers})
       RETURNING id
     `
     
@@ -989,7 +1004,7 @@ export async function updateMatchField(
   }
 
   // Whitelist of allowed fields
-  const allowedFields = ['title', 'date_time', 'location_type', 'location_custom', 'field', 'team_count', 'team_size', 'is_public', 'max_players', 'invites_per_player']
+  const allowedFields = ['title', 'date_time', 'location_type', 'location_custom', 'field', 'field_id', 'team_count', 'team_size', 'is_public', 'max_players', 'invites_per_player']
   if (!allowedFields.includes(field)) {
     return { error: 'Campo no permitido' }
   }
@@ -1013,6 +1028,21 @@ export async function updateMatchField(
       await sql`UPDATE matches SET date_time = ${value as string} WHERE id = ${matchId}`
     } else if (field === 'location_type') {
       await sql`UPDATE matches SET location_type = ${value as string} WHERE id = ${matchId}`
+    } else if (field === 'field_id') {
+      const venue = await getFieldById(Number(value))
+      if (!venue || !venue.is_active) {
+        return { error: 'Cancha no valida' }
+      }
+      const locationType = fieldSlugToLocationType(venue.slug)
+      await sql`
+        UPDATE matches SET
+          field_id = ${Number(value)},
+          location_type = ${locationType}
+        WHERE id = ${matchId}
+      `
+      if (venue.slug !== 'otro') {
+        await sql`UPDATE matches SET location_custom = NULL WHERE id = ${matchId}`
+      }
     } else if (field === 'location_custom') {
       await sql`UPDATE matches SET location_custom = ${value as string} WHERE id = ${matchId}`
     } else if (field === 'field') {
