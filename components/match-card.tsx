@@ -3,6 +3,7 @@ import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { MapPin, Users, Clock, ChevronRight } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { getMatchVenueLabel } from '@/lib/field-display'
 
 interface Match {
   id: number
@@ -10,6 +11,9 @@ interface Match {
   date_time: string
   location_type: string
   location_custom: string | null
+  field_id?: number | null
+  field_name?: string | null
+  field_slug?: string | null
   created_by_user_id: number
   creator_name: string
   player_count: number
@@ -23,12 +27,6 @@ interface MatchCardProps {
   isPast?: boolean
   isRegistered?: boolean
   borderVariant?: 'default' | 'registered' | 'nonRegistered'
-}
-
-const locationLabels: Record<string, string> = {
-  TERRAZAS: 'Terrazas',
-  FENIX: 'Fenix',
-  OTRO: 'Otro',
 }
 
 export function MatchCard({
@@ -57,9 +55,7 @@ export function MatchCard({
   const minutes = date.getUTCMinutes().toString().padStart(2, '0')
   const time = `${hours}:${minutes}`
 
-  const location = match.location_type === 'OTRO' && match.location_custom
-    ? match.location_custom
-    : locationLabels[match.location_type] || match.location_type
+  const location = getMatchVenueLabel(match)
 
   return (
     <Link href={`/dashboard/partido/${match.id}`}>
