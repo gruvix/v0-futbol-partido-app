@@ -34,6 +34,9 @@ async function getDashboardMatches(userId: number): Promise<Match[]> {
       m.date_time,
       m.location_type,
       m.location_custom,
+      m.field_id,
+      f.name as field_name,
+      f.slug as field_slug,
       m.created_by_user_id,
       m.is_public,
       trim(initcap(u.name) || ' ' || initcap(u.last_name)) as creator_name,
@@ -50,6 +53,7 @@ async function getDashboardMatches(userId: number): Promise<Match[]> {
       ) as is_registered
     FROM matches m
     JOIN users u ON m.created_by_user_id = u.id
+    LEFT JOIN fields f ON m.field_id = f.id
     LEFT JOIN match_participants mp_all ON m.id = mp_all.match_id
     WHERE
       m.date_time >= (date_trunc('day', NOW()) - INTERVAL '7 days')
