@@ -10,6 +10,12 @@ interface Match {
   location_type: string
   location_custom: string | null
   field: string | null
+  field_id: number | null
+  field_name: string | null
+  field_slug: string | null
+  field_maps_url: string | null
+  cancellation_deadline_hours: number | null
+  cancellation_penalty: string | null
   created_by_user_id: number
   creator_name: string
   is_public: boolean
@@ -53,6 +59,12 @@ async function getMatch(id: number): Promise<Match | null> {
       m.location_type,
       m.location_custom,
       m.field,
+      m.field_id,
+      f.name as field_name,
+      f.slug as field_slug,
+      f.maps_url as field_maps_url,
+      f.cancellation_deadline_hours,
+      f.cancellation_penalty,
       m.created_by_user_id,
       m.is_public,
       m.team_count,
@@ -64,6 +76,7 @@ async function getMatch(id: number): Promise<Match | null> {
       trim(initcap(u.name) || ' ' || initcap(u.last_name)) as creator_name
     FROM matches m
     JOIN users u ON m.created_by_user_id = u.id
+    LEFT JOIN fields f ON m.field_id = f.id
     WHERE m.id = ${id}
   `
   return matches[0] as Match | null

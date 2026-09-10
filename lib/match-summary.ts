@@ -4,6 +4,9 @@ export interface MatchCountsSummary {
   date_time: string
   location_type: string
   location_custom: string | null
+  field_id: number | null
+  field_name: string | null
+  field_slug: string | null
   player_count: number
   substitute_count: number
 }

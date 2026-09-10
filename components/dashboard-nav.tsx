@@ -22,7 +22,7 @@ import {
   Settings,
   Menu,
   UserPlus,
-  Download,
+  MapPin,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { LoadingOverlay } from '@/components/football-loader'
@@ -41,7 +41,12 @@ export function DashboardNav({ userName, isAdmin }: DashboardNavProps) {
     { href: '/dashboard/calendario', label: 'Calendario', icon: Calendar },
     { href: '/dashboard/jugadores', label: 'Jugadores', icon: Users },
     { href: '/dashboard/configuracion', label: 'Config', icon: Settings },
-    ...(isAdmin ? [{ href: '/dashboard/stats', label: 'Stats', icon: BarChart3 }] : []),
+    ...(isAdmin
+      ? [
+          { href: '/dashboard/canchas', label: 'Canchas', icon: MapPin },
+          { href: '/dashboard/stats', label: 'Stats', icon: BarChart3 },
+        ]
+      : []),
   ]
 
   async function handleLogout() {
@@ -140,20 +145,6 @@ export function DashboardNav({ userName, isAdmin }: DashboardNavProps) {
                   <Link href="/dashboard/invitar" prefetch={true} className="gap-3.5 cursor-pointer">
                     <UserPlus className="w-7 h-7" />
                     Invitar usuario
-                  </Link>
-                </DropdownMenuItem>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem asChild>
-                  <Link
-                    href="/dashboard/descargar-app"
-                    prefetch={true}
-                    className={cn(
-                      'gap-3.5 cursor-pointer',
-                      pathname === '/dashboard/descargar-app' && 'bg-accent',
-                    )}
-                  >
-                    <Download className="w-7 h-7" />
-                    Descargar app
                   </Link>
                 </DropdownMenuItem>
               </DropdownMenuContent>
