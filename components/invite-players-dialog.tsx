@@ -1,14 +1,13 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { Check, Search, UserPlus } from 'lucide-react'
+import { Check, RotateCcw, Search, UserPlus } from 'lucide-react'
 import { useRouter } from 'next/navigation'
 
 import { getAllUsers, getInviteCount, inviteGuest, invitePlayer, type InviteGuestInput } from '@/app/actions/matches'
 import { GenderIcon, type Gender } from '@/lib/gender'
-import { waitForNextPaint } from '@/lib/wait-for-next-paint'
 import { useErrorToast } from '@/components/error-toast-provider'
-import { InlineLoader, useActionLoader } from '@/components/football-loader'
+import { InlineLoader } from '@/components/football-loader'
 import { Button } from '@/components/ui/button'
 import {
   Dialog,
@@ -24,6 +23,35 @@ interface User {
   name: string
   phone_last_four: string
   gender: Gender
+}
+
+type InviteQueueStatus = 'pending' | 'success' | 'error'
+
+type InviteQueueItem =
+  | {
+      id: string
+      kind: 'user'
+      userId: number
+      displayName: string
+      gender: Gender
+      role: 'PLAYER' | 'SUBSTITUTE'
+      overridePriority: boolean
+      status: InviteQueueStatus
+      error?: string
+    }
+  | {
+      id: string
+      kind: 'guest'
+      displayName: string
+      guestPayload: InviteGuestInput
+      overridePriority: boolean
+      status: InviteQueueStatus
+      error?: string
+    }
+
+function queueItemKey(item: InviteQueueItem): string {
+  if (item.kind === 'user') return `user:${item.userId}:${item.role}`
+  return `guest:${item.guestPayload.name.trim().toLowerCase()}:${item.guestPayload.role}`
 }
 
 interface InvitePlayersDialogProps {
@@ -51,12 +79,10 @@ export function InvitePlayersDialog({
 }: InvitePlayersDialogProps): React.JSX.Element {
   const router = useRouter()
   const { showError } = useErrorToast()
-  const { showLoader, hideLoader } = useActionLoader()
 
   const [users, setUsers] = useState<User[]>([])
   const [loadingUsers, setLoadingUsers] = useState(false)
-  const [invitingId, setInvitingId] = useState<number | null>(null)
-  const [invitedIds, setInvitedIds] = useState<number[]>([])
+  const [inviteQueue, setInviteQueue] = useState<InviteQueueItem[]>([])
   const [search, setSearch] = useState('')
   const [myInviteCount, setMyInviteCount] = useState(0)
   const [showGuestForm, setShowGuestForm] = useState(false)
@@ -67,12 +93,10 @@ export function InvitePlayersDialog({
   const [guestLastFour, setGuestLastFour] = useState('')
   const [guestGender, setGuestGender] = useState<InviteGuestInput['gender']>('MALE')
   const [guestRole, setGuestRole] = useState<InviteGuestInput['role']>('PLAYER')
-  const [guestSubmitting, setGuestSubmitting] = useState(false)
-  // keep track of invited guest names to prevent duplicates
-  const [invitedGuestNames, setInvitedGuestNames] = useState<string[]>([])
 
   const hasLimit = invitesPerPlayer !== null && invitesPerPlayer !== undefined
-  const remainingInvites = hasLimit ? invitesPerPlayer - (myInviteCount + invitedIds.length) : Infinity
+  const sessionActiveInvites = inviteQueue.filter(i => i.status !== 'error').length
+  const remainingInvites = hasLimit ? invitesPerPlayer - (myInviteCount + sessionActiveInvites) : Infinity
   const reachedLimit = hasLimit && remainingInvites <= 0
   const isPlayerInviteDisabled = !canInviteAsPlayer && !canOverridePlayerInvitePriority
   const needsPlayerInviteOverride = !canInviteAsPlayer && canOverridePlayerInvitePriority
@@ -82,7 +106,7 @@ export function InvitePlayersDialog({
   useEffect(() => {
     if (!open) return
 
-    setInvitedIds([])
+    setInviteQueue([])
     setSearch('')
     setShowGuestForm(false)
     setGuestName('')
@@ -90,8 +114,6 @@ export function InvitePlayersDialog({
     setGuestGender('MALE')
     setGuestRole('PLAYER')
     setFeedback(null)
-    // reset duplicate tracking for each dialog session
-    setInvitedGuestNames([])
 
     async function init(): Promise<void> {
       try {
@@ -136,7 +158,71 @@ export function InvitePlayersDialog({
     setFeedback(null)
   }
 
-  async function handleInvite(userId: number, role: 'PLAYER' | 'SUBSTITUTE'): Promise<void> {
+  function isUserInviteInFlight(userId: number): boolean {
+    return inviteQueue.some(i => i.kind === 'user' && i.userId === userId && i.status === 'pending')
+  }
+
+  function isUserAlreadyInvited(userId: number): boolean {
+    return inviteQueue.some(i => i.kind === 'user' && i.userId === userId && i.status === 'success')
+  }
+
+  function isGuestNameQueued(name: string, role: InviteGuestInput['role']): boolean {
+    const key = name.trim().toLowerCase()
+    return inviteQueue.some(
+      i => i.kind === 'guest'
+        && i.guestPayload.name.trim().toLowerCase() === key
+        && i.guestPayload.role === role
+        && i.status !== 'error',
+    )
+  }
+
+  function patchQueueItem(id: string, patch: Partial<InviteQueueItem>): void {
+    setInviteQueue(prev => prev.map(item => (item.id === id ? { ...item, ...patch } as InviteQueueItem : item)))
+  }
+
+  async function runUserInvite(item: InviteQueueItem & { kind: 'user' }): Promise<void> {
+    patchQueueItem(item.id, { status: 'pending', error: undefined })
+    const result = await invitePlayer(matchId, item.userId, item.role, item.overridePriority) as { error?: unknown }
+
+    if (result?.error) {
+      patchQueueItem(item.id, {
+        status: 'error',
+        error: getErrorMessage(result.error, 'Error al intentar invitar jugador'),
+      })
+      return
+    }
+
+    patchQueueItem(item.id, { status: 'success', error: undefined })
+    router.refresh()
+
+    if (hasLimit) {
+      const r = await getInviteCount(matchId, currentUserId)
+      setMyInviteCount(r.count)
+    }
+  }
+
+  async function runGuestInvite(item: InviteQueueItem & { kind: 'guest' }): Promise<void> {
+    patchQueueItem(item.id, { status: 'pending', error: undefined })
+    const result = await inviteGuest(matchId, item.guestPayload, item.overridePriority) as { error?: unknown }
+
+    if (result?.error) {
+      patchQueueItem(item.id, {
+        status: 'error',
+        error: getErrorMessage(result.error, 'Error al intentar invitar'),
+      })
+      return
+    }
+
+    patchQueueItem(item.id, { status: 'success', error: undefined })
+    router.refresh()
+
+    if (hasLimit) {
+      const r = await getInviteCount(matchId, currentUserId)
+      setMyInviteCount(r.count)
+    }
+  }
+
+  async function handleInvite(user: User, role: 'PLAYER' | 'SUBSTITUTE'): Promise<void> {
     if (role === 'PLAYER' && isPlayerInviteDisabled) {
       setFeedback({ type: 'error', message: playerInviteReason })
       return
@@ -145,27 +231,41 @@ export function InvitePlayersDialog({
     if (overridePriority && !window.confirm(overrideConfirmMessage)) {
       return
     }
-
-    setInvitingId(userId)
-    setFeedback(null)
-    const roleLabel = role === 'PLAYER' ? 'jugador' : 'suplente'
-    showLoader(`Invitando ${roleLabel}...`)
-    await waitForNextPaint()
-    const result = await invitePlayer(matchId, userId, role, overridePriority) as any
-    hideLoader()
-
-    if (result?.error) {
-      setFeedback({ type: 'error', message: getErrorMessage(result.error, 'Error al intentar invitar jugador') })
-      setInvitingId(null)
+    if (isUserInviteInFlight(user.id) || isUserAlreadyInvited(user.id)) {
       return
     }
 
-    // successful invite: clear search and reset form state
+    const existing = inviteQueue.find(i => i.kind === 'user' && i.userId === user.id && i.role === role && i.status === 'error')
+    const id = existing?.id ?? crypto.randomUUID()
+
+    setFeedback(null)
     setSearch('')
-    setInvitedIds(prev => [...prev, userId])
-    setFeedback({ type: 'success', message: `Jugador invitado como ${role === 'PLAYER' ? 'jugador' : 'suplente'}.` })
-    setInvitingId(null)
-    router.refresh()
+
+    const item: InviteQueueItem = {
+      id,
+      kind: 'user',
+      userId: user.id,
+      displayName: user.name,
+      gender: user.gender,
+      role,
+      overridePriority,
+      status: 'pending',
+    }
+
+    setInviteQueue(prev => {
+      const without = prev.filter(i => i.id !== id)
+      return [...without, item]
+    })
+
+    void runUserInvite(item)
+  }
+
+  function retryQueueItem(item: InviteQueueItem): void {
+    if (item.kind === 'user') {
+      void runUserInvite(item)
+    } else {
+      void runGuestInvite(item)
+    }
   }
 
   async function handleInviteGuest(): Promise<void> {
@@ -174,9 +274,8 @@ export function InvitePlayersDialog({
       setFeedback({ type: 'error', message: 'Ingresá un nombre para el invitado' })
       return
     }
-    // Prevent duplicate non‑registered invites by name before sending request
-    if (invitedGuestNames.includes(name)) {
-      setFeedback({ type: 'error', message: 'Ya existe un invitado con ese nombre' })
+    if (isGuestNameQueued(name, guestRole)) {
+      setFeedback({ type: 'error', message: 'Ya existe un invitado con ese nombre en esta sesión' })
       return
     }
     if (guestRole === 'PLAYER' && isPlayerInviteDisabled) {
@@ -188,48 +287,55 @@ export function InvitePlayersDialog({
       return
     }
 
-    setGuestSubmitting(true)
-    setFeedback(null)
-    showLoader('Agregando invitado...')
-    await waitForNextPaint()
-    const result = await inviteGuest(matchId, {
+    const guestPayload: InviteGuestInput = {
       name,
       phoneLastFour: guestLastFour.trim() || undefined,
       gender: guestGender,
       role: guestRole,
-    }, overridePriority) as any
-    hideLoader()
-    setGuestSubmitting(false)
-
-    if ((result as any)?.error) {
-      setFeedback({ type: 'error', message: getErrorMessage(result.error, 'Error al intentar invitar') })
-      return
     }
 
-    // Prevent duplicate non‑registered invites by name
-    if (invitedGuestNames.includes(name)) {
-      setFeedback({ type: 'error', message: 'Ya existe un invitado con ese nombre' })
-      return
+    const existingKey = queueItemKey({
+      id: '',
+      kind: 'guest',
+      displayName: name,
+      guestPayload,
+      overridePriority,
+      status: 'error',
+    })
+    const existing = inviteQueue.find(i => queueItemKey(i) === existingKey && i.status === 'error')
+    const id = existing?.id ?? crypto.randomUUID()
+
+    setFeedback(null)
+    setSearch('')
+
+    const item: InviteQueueItem = {
+      id,
+      kind: 'guest',
+      displayName: name,
+      guestPayload,
+      overridePriority,
+      status: 'pending',
     }
 
-    // Reset form, hide guest form, clear search and refresh invite count (limit display)
+    setInviteQueue(prev => {
+      const without = prev.filter(i => i.id !== id)
+      return [...without, item]
+    })
+
     setGuestName('')
     setGuestLastFour('')
     setGuestGender('MALE')
     setGuestRole('PLAYER')
     setShowGuestForm(false)
-    setSearch('')
-    setInvitedGuestNames(prev => [...prev, name])
-    setFeedback({ type: 'success', message: `${name} fue invitado como ${guestRole === 'PLAYER' ? 'jugador' : 'suplente'}.` })
-    router.refresh()
 
-    if (hasLimit) {
-      const r = await getInviteCount(matchId, currentUserId)
-      setMyInviteCount(r.count)
-    }
+    void runGuestInvite(item)
   }
 
-  const availableUsers = users.filter(u => !currentParticipantIds.includes(u.id) && !invitedIds.includes(u.id))
+  const queuedUserIds = new Set(
+    inviteQueue.flatMap(i => (i.kind === 'user' && i.status !== 'error' ? [i.userId] : [])),
+  )
+
+  const availableUsers = users.filter(u => !currentParticipantIds.includes(u.id) && !queuedUserIds.has(u.id))
 
   const filteredUsers = availableUsers.filter(
     u => u.name.toLowerCase().includes(search.toLowerCase()) || u.phone_last_four.includes(search)
@@ -299,37 +405,36 @@ export function InvitePlayersDialog({
                 <InlineLoader />
               </div>
             ) : (
-              <div className="flex flex-col gap-2 py-2">
+              <div className="flex flex-col gap-1 py-1">
                 {filteredUsers.map((user) => {
-                  const isInviting = invitingId === user.id
-                  const isInvited = invitedIds.includes(user.id)
+                  const playerPending = inviteQueue.some(
+                    i => i.kind === 'user' && i.userId === user.id && i.role === 'PLAYER' && i.status === 'pending',
+                  )
+                  const subPending = inviteQueue.some(
+                    i => i.kind === 'user' && i.userId === user.id && i.role === 'SUBSTITUTE' && i.status === 'pending',
+                  )
                   return (
                     <div
                       key={user.id}
-                      className="flex items-center justify-between gap-3 p-3 rounded-lg border border-border hover:bg-muted/50 transition-colors"
+                      className="flex items-center justify-between gap-2 px-2 py-1 rounded-md border border-border hover:bg-muted/50 transition-colors"
                     >
                       <div className="min-w-0">
-                        <p className="font-medium text-foreground inline-flex items-center gap-1">
-                          <GenderIcon gender={user.gender} className="w-4 h-4 shrink-0" />
+                        <p className="text-sm font-medium text-foreground inline-flex items-center gap-1">
+                          <GenderIcon gender={user.gender} className="w-3.5 h-3.5 shrink-0" />
                           <span className="truncate">{user.name}</span>
                         </p>
-                        <p className="text-sm text-muted-foreground">****{user.phone_last_four}</p>
+                        <p className="text-xs text-muted-foreground">****{user.phone_last_four}</p>
                       </div>
                       <div className="flex flex-col gap-1 sm:flex-row">
                         <Button
                           size="sm"
-                          variant={isInvited ? 'secondary' : 'default'}
-                          onClick={() => void handleInvite(user.id, 'PLAYER')}
-                          disabled={isInviting || isInvited || reachedLimit || isPlayerInviteDisabled}
+                          variant="default"
+                          onClick={() => void handleInvite(user, 'PLAYER')}
+                          disabled={playerPending || reachedLimit || isPlayerInviteDisabled}
                           className="gap-2"
                         >
-                          {isInviting ? (
+                          {playerPending ? (
                             <InlineLoader size="sm" />
-                          ) : isInvited ? (
-                            <>
-                              <Check className="w-4 h-4" />
-                              Invitado
-                            </>
                           ) : (
                             <>
                               <UserPlus className="w-4 h-4" />
@@ -339,18 +444,13 @@ export function InvitePlayersDialog({
                         </Button>
                         <Button
                           size="sm"
-                          variant={isInvited ? 'secondary' : 'outline'}
-                          onClick={() => void handleInvite(user.id, 'SUBSTITUTE')}
-                          disabled={isInviting || isInvited || reachedLimit}
+                          variant="outline"
+                          onClick={() => void handleInvite(user, 'SUBSTITUTE')}
+                          disabled={subPending || reachedLimit}
                           className="gap-2"
                         >
-                          {isInviting ? (
+                          {subPending ? (
                             <InlineLoader size="sm" />
-                          ) : isInvited ? (
-                            <>
-                              <Check className="w-4 h-4" />
-                              Invitado
-                            </>
                           ) : (
                             <>
                               <UserPlus className="w-4 h-4" />
@@ -404,7 +504,7 @@ export function InvitePlayersDialog({
                   value={guestName}
                   onChange={(e) => setGuestName(e.target.value)}
                   maxLength={255}
-                  disabled={guestSubmitting || reachedLimit}
+                  disabled={reachedLimit}
                   autoFocus
                 />
 
@@ -416,13 +516,13 @@ export function InvitePlayersDialog({
                     value={guestLastFour}
                     onChange={(e) => setGuestLastFour(onlyDigits(e.target.value).slice(-4))}
                     maxLength={4}
-                    disabled={guestSubmitting || reachedLimit}
+                    disabled={reachedLimit}
                   />
 
                   <select
                     value={guestGender}
                     onChange={(e) => setGuestGender(e.target.value as InviteGuestInput['gender'])}
-                    disabled={guestSubmitting || reachedLimit}
+                    disabled={reachedLimit}
                     className="h-9 px-2 rounded-md border border-border bg-background text-foreground text-sm focus:ring-1 focus:ring-ring"
                   >
                     <option value="MALE">Hombre</option>
@@ -435,7 +535,7 @@ export function InvitePlayersDialog({
                   <select
                     value={guestRole}
                     onChange={(e) => setGuestRole(e.target.value as InviteGuestInput['role'])}
-                    disabled={guestSubmitting || reachedLimit}
+                    disabled={reachedLimit}
                     className="h-9 px-2 rounded-md border border-border bg-background text-foreground text-sm focus:ring-1 focus:ring-ring"
                   >
                     <option value="PLAYER">Jugador</option>
@@ -448,7 +548,6 @@ export function InvitePlayersDialog({
                       size="sm"
                       className="flex-1"
                       onClick={cancelGuestForm}
-                      disabled={guestSubmitting}
                     >
                       Cancelar
                     </Button>
@@ -456,9 +555,9 @@ export function InvitePlayersDialog({
                       size="sm"
                       className="flex-1"
                       onClick={() => void handleInviteGuest()}
-                      disabled={guestSubmitting || reachedLimit || (guestRole === 'PLAYER' && isPlayerInviteDisabled)}
+                      disabled={reachedLimit || (guestRole === 'PLAYER' && isPlayerInviteDisabled)}
                     >
-                      {guestSubmitting ? <InlineLoader size="sm" /> : 'Invitar'}
+                      Invitar
                     </Button>
                   </div>
                 </div>
@@ -466,6 +565,61 @@ export function InvitePlayersDialog({
             </div>
           )}
         </div>
+
+        {inviteQueue.length > 0 ? (
+          <div className="flex flex-col gap-1 pt-2 border-t border-border -mx-6 px-6">
+            <p className="text-xs font-medium text-muted-foreground">Invitaciones en curso</p>
+            <ul className="flex flex-col gap-0.5 max-h-32 overflow-y-auto">
+              {inviteQueue.map((item) => {
+                const roleLabel = (item.kind === 'user' ? item.role : item.guestPayload.role) === 'PLAYER' ? 'jugador' : 'suplente'
+                return (
+                  <li
+                    key={item.id}
+                    className="rounded-md border border-border px-2 py-0.5 text-xs"
+                  >
+                    <div className="flex items-center justify-between gap-2 min-h-6">
+                      <p className="min-w-0 font-medium text-foreground inline-flex items-center gap-1 truncate">
+                        {item.kind === 'user' ? (
+                          <GenderIcon gender={item.gender} className="w-3 h-3 shrink-0" />
+                        ) : (
+                          <GenderIcon gender="OTHER" className="w-3 h-3 shrink-0" />
+                        )}
+                        <span className="truncate">{item.displayName}</span>
+                        <span className="shrink-0 font-normal text-muted-foreground">
+                          · Como {roleLabel}
+                        </span>
+                      </p>
+                      <div className="shrink-0 flex items-center">
+                        {item.status === 'pending' ? (
+                          <InlineLoader size="sm" />
+                        ) : item.status === 'success' ? (
+                          <span className="inline-flex items-center gap-0.5 text-emerald-600 dark:text-emerald-400 font-medium">
+                            <Check className="w-3 h-3" />
+                            Invitado
+                          </span>
+                        ) : (
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            className="h-6 px-1.5 gap-0.5 text-[11px]"
+                            onClick={() => retryQueueItem(item)}
+                          >
+                            <RotateCcw className="w-3 h-3" />
+                            Reintentar
+                          </Button>
+                        )}
+                      </div>
+                    </div>
+                    {item.status === 'error' && item.error ? (
+                      <p className="mt-0.5 pl-4 leading-snug text-destructive">{item.error}</p>
+                    ) : null}
+                  </li>
+                )
+              })}
+            </ul>
+          </div>
+        ) : null}
 
         <div className="flex justify-end pt-4 border-t border-border -mx-6 px-6">
           <Button variant="outline" onClick={() => onOpenChange(false)} className="bg-transparent">
