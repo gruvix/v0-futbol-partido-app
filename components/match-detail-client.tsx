@@ -9,7 +9,6 @@ import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
-import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
 import {
   ArrowLeft,
   MapPin,
@@ -61,6 +60,9 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { getParticipantCountsFromRoster } from '@/lib/match-summary'
+import { listActiveFieldsAction } from '@/app/actions/fields'
+import { getMatchVenueLabel, getCancellationPolicySummary } from '@/lib/field-display'
+import type { Field } from '@/lib/fields'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -79,6 +81,12 @@ interface Match {
   location_type: string
   location_custom: string | null
   field: string | null
+  field_id: number | null
+  field_name: string | null
+  field_slug: string | null
+  field_maps_url?: string | null
+  cancellation_deadline_hours?: number | null
+  cancellation_penalty?: string | null
   created_by_user_id: number
   creator_name: string
   is_public: boolean
@@ -124,12 +132,6 @@ interface MatchDetailClientProps {
   userParticipation?: Participant
   isPast: boolean
   currentUserId: number
-}
-
-const locationLabels: Record<string, string> = {
-  TERRAZAS: 'Terrazas',
-  FENIX: 'Fenix',
-  OTRO: 'Otro',
 }
 
 const COMMON_TIMES = [
@@ -227,7 +229,8 @@ export function MatchDetailClient({
 
   // Edit state for each field
   const [editTitle, setEditTitle] = useState(match.title || '')
-  const [editLocationType, setEditLocationType] = useState(match.location_type)
+  const [venueFields, setVenueFields] = useState<Field[]>([])
+  const [editFieldId, setEditFieldId] = useState<number | null>(match.field_id)
   const [editLocationCustom, setEditLocationCustom] = useState(match.location_custom || '')
   const [editField, setEditField] = useState(match.field || '')
   const [editTeamCount, setEditTeamCount] = useState(match.team_count)
@@ -272,9 +275,18 @@ export function MatchDetailClient({
   const minutes = date.getUTCMinutes().toString().padStart(2, '0')
   const formattedTime = `${hours}:${minutes}`
   
-  const location = match.location_type === 'OTRO' && match.location_custom
-    ? match.location_custom
-    : locationLabels[match.location_type] || match.location_type
+  const location = getMatchVenueLabel(match)
+  const cancellationPolicy = getCancellationPolicySummary({
+    cancellation_deadline_hours: match.cancellation_deadline_hours,
+    cancellation_penalty: match.cancellation_penalty,
+  })
+
+  useEffect(() => {
+    if (!isAdmin) return
+    listActiveFieldsAction().then(setVenueFields)
+  }, [isAdmin])
+
+  const editSelectedVenue = venueFields.find((f) => f.id === editFieldId) ?? null
 
   // Display title - fallback to "Partido de [creator]"
   const displayTitle = match.title || `Partido de ${match.creator_name}`
@@ -1092,16 +1104,35 @@ export function MatchDetailClient({
               <EditableField
                 icon={<MapPin className="w-4 h-4 text-primary" />}
                 displayValue={
-                  <span className="text-foreground">
-                    {location}{match.field ? ` - ${match.field}` : ''}
-                  </span>
+                  <div className="flex flex-col gap-1">
+                    <span className="text-foreground">
+                      {location}{match.field ? ` - ${match.field}` : ''}
+                    </span>
+                    {match.field_maps_url && (
+                      <a
+                        href={match.field_maps_url}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="text-sm text-primary underline"
+                      >
+                        Cómo llegar
+                      </a>
+                    )}
+                    {cancellationPolicy && (
+                      <span className="text-xs text-muted-foreground">{cancellationPolicy}</span>
+                    )}
+                  </div>
                 }
                 canEdit={isAdmin && !isPast}
                 onSave={async () => {
+                  if (!editFieldId) {
+                    showError('Seleccioná una cancha')
+                    return
+                  }
                   showLoader('Guardando...')
                   await waitForNextPaint()
-                  await updateMatchField(match.id, 'location_type', editLocationType)
-                  if (editLocationType === 'OTRO') {
+                  await updateMatchField(match.id, 'field_id', editFieldId)
+                  if (editSelectedVenue?.slug === 'otro') {
                     await updateMatchField(match.id, 'location_custom', editLocationCustom)
                   }
                   await updateMatchField(match.id, 'field', editField || null)
@@ -1111,24 +1142,19 @@ export function MatchDetailClient({
                 renderEditor={() => (
                   <div className="flex flex-col gap-3">
                     <div className="flex flex-col gap-2">
-                      <span className="text-xs text-muted-foreground font-medium">Ubicacion</span>
-                      <RadioGroup
-                        value={editLocationType}
-                        onValueChange={setEditLocationType}
-                        className="flex flex-col gap-1"
+                      <span className="text-xs text-muted-foreground font-medium">Cancha / predio</span>
+                      <select
+                        value={editFieldId ?? ''}
+                        onChange={(e) => setEditFieldId(parseInt(e.target.value, 10))}
+                        className="h-9 px-2 rounded-md border border-border bg-background text-foreground text-sm"
                       >
-                        {['TERRAZAS', 'FENIX', 'OTRO'].map((loc) => (
-                          <div key={loc} className={`flex items-center gap-2 p-2 rounded-lg border-2 transition-all cursor-pointer ${
-                            editLocationType === loc ? 'border-primary bg-primary/10' : 'border-border hover:border-primary/50'
-                          }`}>
-                            <RadioGroupItem value={loc} id={`loc-${loc}`} />
-                            <Label htmlFor={`loc-${loc}`} className="cursor-pointer flex-1 font-normal text-sm">
-                              {loc === 'OTRO' ? 'Otra ubicacion' : locationLabels[loc]}
-                            </Label>
-                          </div>
+                        {venueFields.map((venue) => (
+                          <option key={venue.id} value={venue.id}>
+                            {venue.name}
+                          </option>
                         ))}
-                      </RadioGroup>
-                      {editLocationType === 'OTRO' && (
+                      </select>
+                      {editSelectedVenue?.slug === 'otro' && (
                         <Input
                           value={editLocationCustom}
                           onChange={(e) => setEditLocationCustom(e.target.value)}

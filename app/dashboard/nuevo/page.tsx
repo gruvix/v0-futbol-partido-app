@@ -6,7 +6,8 @@ import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
+import { listActiveFieldsAction } from '@/app/actions/fields'
+import type { Field } from '@/lib/fields'
 import { Input } from '@/components/ui/input'
 import { createMatch } from '@/app/actions/matches'
 import { getCurrentUser } from '@/app/actions/auth'
@@ -34,7 +35,9 @@ const PICKER_MINUTES = ['00', '15', '30', '45']
 export default function NuevoPartidoPage() {
   const [loading, setLoading] = useState(false)
   const [title, setTitle] = useState('')
-  const [locationType, setLocationType] = useState('TERRAZAS')
+  const [venueFields, setVenueFields] = useState<Field[]>([])
+  const [selectedFieldId, setSelectedFieldId] = useState<number | null>(null)
+  const [locationCustom, setLocationCustom] = useState('')
   const [field, setField] = useState('')
   const [selectedTime, setSelectedTime] = useState('21:00')
   const [customHour, setCustomHour] = useState('21')
@@ -65,7 +68,14 @@ export default function NuevoPartidoPage() {
         setUserName(user.name)
       }
     })
+    listActiveFieldsAction().then((fields) => {
+      setVenueFields(fields)
+      const terrazas = fields.find((f) => f.slug === 'terrazas')
+      setSelectedFieldId(terrazas?.id ?? fields[0]?.id ?? null)
+    })
   }, [])
+
+  const selectedVenue = venueFields.find((f) => f.id === selectedFieldId) ?? null
 
   // Generate 7 days starting from weekOffset * 7 days from tomorrow
   const dates = Array.from({ length: 7 }, (_, i) => {
@@ -103,7 +113,15 @@ export default function NuevoPartidoPage() {
     const formData = new FormData()
     formData.set('date', selectedDate)
     formData.set('time', useCustomTime ? `${customHour}:${customMinute}` : selectedTime)
-    formData.set('locationType', locationType)
+    if (!selectedFieldId) {
+      showError('Seleccioná una cancha')
+      setLoading(false)
+      return
+    }
+    formData.set('fieldId', String(selectedFieldId))
+    if (selectedVenue?.slug === 'otro') {
+      formData.set('locationCustom', locationCustom)
+    }
     formData.set('field', field)
     formData.set('isPublic', isPublic.toString())
     formData.set('title', title)
@@ -293,53 +311,39 @@ export default function NuevoPartidoPage() {
               )}
             </div>
 
-            {/* Location selection */}
+            {/* Venue selection */}
             <div className="flex flex-col gap-3">
               <Label className="flex items-center gap-2">
                 <MapPin className="w-4 h-4 text-primary" />
-                Ubicacion
+                Cancha / predio
               </Label>
-              <RadioGroup
-                value={locationType}
-                onValueChange={setLocationType}
-                className="flex flex-col gap-2"
+              <select
+                value={selectedFieldId ?? ''}
+                onChange={(e) => setSelectedFieldId(parseInt(e.target.value, 10))}
+                className="h-10 px-3 rounded-md border border-border bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+                required
               >
-                <div className={`flex items-center gap-3 p-3 rounded-lg border-2 transition-all cursor-pointer ${
-                  locationType === 'TERRAZAS' ? 'border-primary bg-primary/10' : 'border-border hover:border-primary/50'
-                }`}>
-                  <RadioGroupItem value="TERRAZAS" id="terrazas" />
-                  <Label htmlFor="terrazas" className="cursor-pointer flex-1 font-normal">
-                    Terrazas
-                  </Label>
-                </div>
-                <div className={`flex items-center gap-3 p-3 rounded-lg border-2 transition-all cursor-pointer ${
-                  locationType === 'FENIX' ? 'border-primary bg-primary/10' : 'border-border hover:border-primary/50'
-                }`}>
-                  <RadioGroupItem value="FENIX" id="fenix" />
-                  <Label htmlFor="fenix" className="cursor-pointer flex-1 font-normal">
-                    Fenix
-                  </Label>
-                </div>
-                <div className={`flex items-center gap-3 p-3 rounded-lg border-2 transition-all cursor-pointer ${
-                  locationType === 'OTRO' ? 'border-primary bg-primary/10' : 'border-border hover:border-primary/50'
-                }`}>
-                  <RadioGroupItem value="OTRO" id="otro" />
-                  <Label htmlFor="otro" className="cursor-pointer flex-1 font-normal">
-                    Otra ubicacion
-                  </Label>
-                </div>
-              </RadioGroup>
+                {venueFields.map((venue) => (
+                  <option key={venue.id} value={venue.id}>
+                    {venue.name}
+                  </option>
+                ))}
+              </select>
+              {selectedVenue?.cancellation_penalty && (
+                <p className="text-xs text-muted-foreground">{selectedVenue.cancellation_penalty}</p>
+              )}
             </div>
 
-            {locationType === 'OTRO' && (
+            {selectedVenue?.slug === 'otro' && (
               <div className="flex flex-col gap-2">
                 <Label htmlFor="locationCustom">Nombre de la ubicacion</Label>
                 <Input
                   id="locationCustom"
-                  name="locationCustom"
                   type="text"
                   placeholder="Ej: Cancha del barrio"
-                  required={locationType === 'OTRO'}
+                  value={locationCustom}
+                  onChange={(e) => setLocationCustom(e.target.value)}
+                  required
                 />
               </div>
             )}
