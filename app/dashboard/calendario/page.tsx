@@ -47,7 +47,7 @@ async function getMatchesForCalendarMonth(year: number, month: number): Promise<
           WHERE mp_me.match_id = m.id AND mp_me.user_id = ${session.userId}
         )
       )
-    GROUP BY m.id
+    GROUP BY m.id, f.id
     ORDER BY m.date_time ASC
   `
 

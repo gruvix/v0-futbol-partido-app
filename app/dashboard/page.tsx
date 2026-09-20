@@ -65,7 +65,7 @@ async function getDashboardMatches(userId: number): Promise<Match[]> {
           WHERE mp_me.match_id = m.id AND mp_me.user_id = ${userId}
         )
       )
-    GROUP BY m.id, u.name, u.last_name
+    GROUP BY m.id, u.name, u.last_name, f.id
     ORDER BY m.date_time ASC
     LIMIT 20
   `
