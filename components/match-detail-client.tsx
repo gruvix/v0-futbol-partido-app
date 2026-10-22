@@ -61,6 +61,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { getParticipantCountsFromRoster } from '@/lib/match-summary'
+import { addCalendarDaysYmd, formatYmd, wallClockToStoredIso, ymdToUtcDate, zonedParts } from '@/lib/timezone'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -410,11 +411,10 @@ export function MatchDetailClient({
   }
 
   // Generate edit dates
-  const editDates = Array.from({ length: 7 }, (_, i) => {
-    const d = new Date()
-    d.setDate(d.getDate() + 1 + (editWeekOffset * 7) + i)
-    return d
-  })
+  const todayYmd = formatYmd(zonedParts(new Date()))
+  const editDates = Array.from({ length: 7 }, (_, i) =>
+    ymdToUtcDate(addCalendarDaysYmd(todayYmd, 1 + editWeekOffset * 7 + i))
+  )
   const canEditGoForward = editWeekOffset < 4
   const canEditGoBack = editWeekOffset > 0
 
@@ -971,8 +971,7 @@ export function MatchDetailClient({
                 canEdit={isAdmin && !isPast}
                 onSave={async () => {
                   const time = editUseCustomTime ? `${editCustomHour}:${editCustomMinute}` : editSelectedTime
-                  const dateTime = new Date(`${editSelectedDate}T${time}:00.000Z`)
-                  await handleFieldSave('date_time', dateTime.toISOString())
+                  await handleFieldSave('date_time', wallClockToStoredIso(editSelectedDate, time))
                 }}
                 renderEditor={() => (
                   <div className="flex flex-col gap-3">
@@ -992,7 +991,7 @@ export function MatchDetailClient({
                       </button>
                       <div className="flex-1 grid grid-cols-7 gap-1">
                         {editDates.map((d) => {
-                          const dateStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+                          const dateStr = `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`
                           const isSelected = editSelectedDate === dateStr
                           return (
                             <button
@@ -1005,9 +1004,9 @@ export function MatchDetailClient({
                                   : 'border-border hover:border-primary/50 hover:bg-muted/50'
                               }`}
                             >
-                              <span className="text-[10px] font-medium">{dayNamesShort[d.getDay()]}</span>
-                              <span className="text-sm font-bold">{d.getDate()}</span>
-                              <span className="text-[9px] text-muted-foreground">{monthNamesShort[d.getMonth()]}</span>
+                              <span className="text-[10px] font-medium">{dayNamesShort[d.getUTCDay()]}</span>
+                              <span className="text-sm font-bold">{d.getUTCDate()}</span>
+                              <span className="text-[9px] text-muted-foreground">{monthNamesShort[d.getUTCMonth()]}</span>
                             </button>
                           )
                         })}

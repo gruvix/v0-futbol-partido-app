@@ -12,6 +12,7 @@ import {
   sendEligibleSubstitutesPush,
 } from '@/lib/push'
 import { computeMatchCapacity, computeRosterPolicy, type RosterParticipant } from '@/lib/match-roster'
+import { isMatchPast, wallClockToStoredIso } from '@/lib/timezone'
 
 function computedMaxPlayers(teamCount: number, teamSize: number): number {
   if (teamCount <= 0) return 0
@@ -278,16 +279,16 @@ export async function createMatch(formData: FormData) {
     return { error: 'Todos los campos son requeridos' }
   }
 
-  const dateTime = new Date(`${dateStr}T${time}`)
-  
-  if (dateTime < new Date()) {
+  const dateTimeIso = wallClockToStoredIso(dateStr, time)
+
+  if (isMatchPast(dateTimeIso)) {
     return { error: 'La fecha debe ser en el futuro' }
   }
 
   try {
     const result = await sql`
       INSERT INTO matches (created_by_user_id, date_time, location_type, location_custom, field, is_public, title, team_count, team_size, max_players, invites_per_player, auto_admin_registered_players)
-      VALUES (${session.userId}, ${dateTime.toISOString()}, ${locationType}, ${locationCustom || null}, ${field || null}, ${isPublic}, ${title}, ${teamCount}, ${teamSize}, ${maxPlayers}, ${invitesPerPlayer}, ${autoAdminRegisteredPlayers})
+      VALUES (${session.userId}, ${dateTimeIso}, ${locationType}, ${locationCustom || null}, ${field || null}, ${isPublic}, ${title}, ${teamCount}, ${teamSize}, ${maxPlayers}, ${invitesPerPlayer}, ${autoAdminRegisteredPlayers})
       RETURNING id
     `
     

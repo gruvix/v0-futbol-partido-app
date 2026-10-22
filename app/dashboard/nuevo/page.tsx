@@ -15,6 +15,7 @@ import { Switch } from '@/components/ui/switch'
 import Link from 'next/link'
 import { useActionLoader } from '@/components/football-loader'
 import { useErrorToast } from '@/components/error-toast-provider'
+import { addCalendarDaysYmd, formatYmd, ymdToUtcDate, zonedParts } from '@/lib/timezone'
 
 const COMMON_TIMES = [
   { label: '16:00', value: '16:00' },
@@ -67,18 +68,12 @@ export default function NuevoPartidoPage() {
     })
   }, [])
 
-  // Generate 7 days starting from weekOffset * 7 days from tomorrow
-  const dates = Array.from({ length: 7 }, (_, i) => {
-    const date = new Date()
-    date.setDate(date.getDate() + 1 + (weekOffset * 7) + i)
-    return date
-  })
-  
-  const [selectedDate, setSelectedDate] = useState(() => {
-    const tomorrow = new Date()
-    tomorrow.setDate(tomorrow.getDate() + 1)
-    return tomorrow.toISOString().split('T')[0]
-  })
+  const todayYmd = formatYmd(zonedParts(new Date()))
+  const dates = Array.from({ length: 7 }, (_, i) =>
+    ymdToUtcDate(addCalendarDaysYmd(todayYmd, 1 + weekOffset * 7 + i))
+  )
+
+  const [selectedDate, setSelectedDate] = useState(() => addCalendarDaysYmd(formatYmd(zonedParts(new Date())), 1))
   
   const dayNames = ['Dom', 'Lun', 'Mar', 'Mie', 'Jue', 'Vie', 'Sab']
   const monthNames = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic']
@@ -193,7 +188,7 @@ export default function NuevoPartidoPage() {
                 </button>
                 <div className="flex-1 grid grid-cols-7 gap-1">
                   {dates.map((date) => {
-                    const dateStr = date.toISOString().split('T')[0]
+                    const dateStr = `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, '0')}-${String(date.getUTCDate()).padStart(2, '0')}`
                     const isSelected = selectedDate === dateStr
                     return (
                       <button
@@ -206,9 +201,9 @@ export default function NuevoPartidoPage() {
                             : 'border-border hover:border-primary/50 hover:bg-muted/50'
                         }`}
                       >
-                        <span className="text-xs font-medium">{dayNames[date.getDay()]}</span>
-                        <span className="text-lg font-bold">{date.getDate()}</span>
-                        <span className="text-[10px] text-muted-foreground">{monthNames[date.getMonth()]}</span>
+                        <span className="text-xs font-medium">{dayNames[date.getUTCDay()]}</span>
+                        <span className="text-lg font-bold">{date.getUTCDate()}</span>
+                        <span className="text-[10px] text-muted-foreground">{monthNames[date.getUTCMonth()]}</span>
                       </button>
                     )
                   })}

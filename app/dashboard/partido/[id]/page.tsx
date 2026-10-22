@@ -2,6 +2,7 @@ import { notFound } from 'next/navigation'
 import { sql } from '@/lib/db'
 import { getSession } from '@/lib/auth'
 import { MatchDetailClient } from '@/components/match-detail-client'
+import { isMatchPast } from '@/lib/timezone'
 
 interface Match {
   id: number
@@ -191,7 +192,7 @@ export default async function MatchDetailPage({
 
   const participants = await getParticipants(matchId, subscribed)
   const userParticipation = subscribed ? participants.find(p => p.user_id === session.userId) : undefined
-  const isPast = new Date(match.date_time) < new Date()
+  const isPast = isMatchPast(match.date_time)
 
   return (
     <MatchDetailClient

@@ -2,6 +2,7 @@ import { CalendarView } from '@/components/calendar-view'
 import { sql } from '@/lib/db'
 import { getSession } from '@/lib/auth'
 import type { MatchCountsSummary } from '@/lib/match-summary'
+import { zonedParts } from '@/lib/timezone'
 
 async function getMatchesForCalendarMonth(year: number, month: number): Promise<MatchCountsSummary[]> {
   // Initial render for current month; other months are fetched client-side.
@@ -51,9 +52,9 @@ async function getMatchesForCalendarMonth(year: number, month: number): Promise<
 }
 
 export default async function CalendarioPage() {
-  const today = new Date()
-  const year = today.getUTCFullYear()
-  const month = today.getUTCMonth()
+  const today = zonedParts(new Date())
+  const year = today.year
+  const month = today.month
 
   // IMPORTANT: We pass initial matches for the current month only.
   // CalendarView will request other months as the user navigates.

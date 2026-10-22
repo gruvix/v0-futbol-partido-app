@@ -13,6 +13,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import type { MatchCountsSummary } from '@/lib/match-summary'
+import { isMatchPast, zonedParts } from '@/lib/timezone'
 
 type MatchSummary = MatchCountsSummary
 
@@ -45,8 +46,8 @@ async function fetchMonthMatches(year: number, month: number): Promise<MatchSumm
 }
 
 export function CalendarView({ initialMatches, initialYear, initialMonth }: CalendarViewProps) {
-  const today = new Date()
-  // Use server-provided UTC month/year to avoid client/server timezone mismatches.
+  const today = zonedParts(new Date())
+  // Month/year come from Argentina calendar, not UTC.
   const [currentMonth, setCurrentMonth] = useState(initialMonth)
   const [currentYear, setCurrentYear] = useState(initialYear)
   const [selectedDay, setSelectedDay] = useState<number | null>(null)
@@ -137,15 +138,14 @@ export function CalendarView({ initialMatches, initialYear, initialMonth }: Cale
 
   const isToday = (day: number) => {
     return (
-      day === today.getDate() &&
-      currentMonth === today.getMonth() &&
-      currentYear === today.getFullYear()
+      day === today.day &&
+      currentMonth === today.month &&
+      currentYear === today.year
     )
   }
 
   const isPast = (day: number) => {
-    const date = new Date(currentYear, currentMonth, day)
-    return date < new Date(today.getFullYear(), today.getMonth(), today.getDate())
+    return Date.UTC(currentYear, currentMonth, day) < Date.UTC(today.year, today.month, today.day)
   }
 
   const selectedDayMatches = selectedDay ? getMatchesForDay(selectedDay) : []
@@ -231,12 +231,12 @@ export function CalendarView({ initialMatches, initialYear, initialMonth }: Cale
             {isLoadingMonth && (
               <p className="text-sm text-muted-foreground">Cargando...</p>
             )}
-            {matches.filter(m => new Date(m.date_time) >= today).length === 0 ? (
+            {matches.filter(m => !isMatchPast(m.date_time)).length === 0 ? (
               <p className="text-sm text-muted-foreground">No hay partidos programados</p>
             ) : (
               <div className="flex flex-col gap-2">
                 {matches
-                  .filter(m => new Date(m.date_time) >= today)
+                  .filter(m => !isMatchPast(m.date_time))
                   .slice(0, 5)
                   .map(match => {
                     const date = new Date(match.date_time)

@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button'
 import Link from 'next/link'
 import { Plus, Calendar } from 'lucide-react'
 import type { MatchCountsSummary } from '@/lib/match-summary'
+import { argentinaCalendarDayStartIso } from '@/lib/timezone'
 
 type Match = MatchCountsSummary & {
   created_by_user_id: number
@@ -26,7 +27,7 @@ function displayName(name: string): string {
 async function getDashboardMatches(userId: number): Promise<Match[]> {
   // Dashboard should not send past matches (before today). Past matches will live in a future section.
   // Privacy rule: private matches are only visible to registered users.
-  // Old matches rule: include up to 1 week in the past (local server date, at midnight).
+  // Old matches rule: include up to 1 week in the past (Argentina calendar midnight).
   const matches = await sql`
     SELECT
       m.id,
@@ -52,7 +53,7 @@ async function getDashboardMatches(userId: number): Promise<Match[]> {
     JOIN users u ON m.created_by_user_id = u.id
     LEFT JOIN match_participants mp_all ON m.id = mp_all.match_id
     WHERE
-      m.date_time >= (date_trunc('day', NOW()) - INTERVAL '7 days')
+      m.date_time >= ${argentinaCalendarDayStartIso(new Date(), -7)}
       AND (
         m.is_public = true
         OR EXISTS (
@@ -78,8 +79,7 @@ export default async function DashboardPage() {
 
   const matches = await getDashboardMatches(session.userId)
 
-  const todayMidnight = new Date()
-  todayMidnight.setHours(0, 0, 0, 0)
+  const todayMidnight = new Date(argentinaCalendarDayStartIso())
 
   const upcomingMatches = matches.filter(m => new Date(m.date_time) >= todayMidnight)
   const pastWeekMatches = matches.filter(m => new Date(m.date_time) < todayMidnight)
